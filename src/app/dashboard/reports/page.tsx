@@ -385,7 +385,7 @@ export default function ReportsPage() {
         <ExpenseForm
           monthId={selectedMonth.id}
           onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); fetchData(); }}
+          onSaved={() => { setShowForm(false); fetchMonthData(); }}
         />
       )}
 

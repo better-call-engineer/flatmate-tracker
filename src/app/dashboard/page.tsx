@@ -15,6 +15,8 @@ import {
   IconLock,
 } from '@/components/GeometricIcons';
 import { Plus as LucidePlus, Calculator as CalculatorIcon } from 'lucide-react';
+import ExpenseForm from '@/components/ExpenseForm';
+import Calculator from '@/components/Calculator';
 
 export default function DashboardPage() {
   const { profile } = useAuth();
@@ -30,6 +32,8 @@ export default function DashboardPage() {
   const [sharedExpenses, setSharedExpenses] = useState<SharedExpenseConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
 
   const today = new Date();
 
@@ -143,84 +147,6 @@ export default function DashboardPage() {
 
   const isLocked = month?.is_closed ?? false;
 
-  // ── Calendar props bundle ─────────────────────────────────────────────────
-  const calendarProps = { month, currentMonthLabel, calendarDays, getMealCellClass, getMealCellGuestStyle, isLocked, setSelectedDay };
-
-  // ── Shared heading strip ──────────────────────────────────────────────────
-  const HeadingStrip = () => (
-    <div className="flex-shrink-0 flex items-end justify-between px-5 sm:px-8 md:px-12 pt-7 md:pt-8 pb-6">
-      <div className="flex flex-col gap-2.5">
-        <p className="text-xs font-medium" style={{ color: '#475569' }}>
-          {month?.label === currentMonthLabel
-            ? format(today, 'EEEE, MMMM d, yyyy')
-            : month ? getMonthLabel(month.label) : ''}
-        </p>
-        <h1 className="text-2xl font-bold leading-tight" style={{ color: '#f1f5f9' }}>
-          Hey, <span style={{ color: '#a78bfa' }}>{profile?.username}</span>
-        </h1>
-        <div className="flex flex-wrap items-center gap-2.5 mt-1.5">
-          {months.length > 0 && (
-            <div className="relative">
-              <select
-                value={selectedMonthId}
-                onChange={e => setSelectedMonthId(e.target.value)}
-                className="bg-[#0d1220] text-slate-300 text-xs font-semibold pl-3 pr-7 py-2 rounded-xl border border-white/10 appearance-none cursor-pointer hover:border-violet-500/40 transition-colors focus:outline-none focus:border-violet-500/60"
-                style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
-              >
-                {months.map(m => (
-                  <option key={m.id} value={m.id}>{getMonthLabel(m.label)}</option>
-                ))}
-              </select>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
-                <svg width="9" height="5" viewBox="0 0 10 6" fill="none">
-                  <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </div>
-            </div>
-          )}
-
-          {/* On Mobile: Round Circular Icon Buttons aligned right beside the Month Box */}
-          <div className="md:hidden flex items-center gap-2">
-            {!isLocked && (
-              <button
-                id="add-expense-mobile-heading"
-                onClick={() => setShowAddExpense(true)}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all active:scale-90"
-                style={{
-                  background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
-                  boxShadow: '0 0 12px rgba(124,58,237,0.5)',
-                }}
-                aria-label="Add Expense"
-              >
-                <LucidePlus size={16} strokeWidth={2.5} />
-              </button>
-            )}
-            <button
-              id="calc-mobile-heading"
-              onClick={() => setShowCalculator(true)}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all active:scale-90"
-              style={{
-                background: 'linear-gradient(135deg, #0ea5e9 0%, #0891b2 100%)',
-                boxShadow: '0 0 12px rgba(14,165,233,0.5)',
-              }}
-              aria-label="Calculator"
-            >
-              <CalculatorIcon size={15} strokeWidth={1.8} />
-            </button>
-          </div>
-
-          {isLocked && (
-            <div className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full"
-              style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.25)' }}>
-              <IconLock size={11} />
-              Closed
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
   // ── Loading skeleton ──────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -273,12 +199,83 @@ export default function DashboardPage() {
   const totalPaidVal = myBalance?.totalPaid ?? 0;
   const dueVal = monthlyExpenseVal - totalPaidVal;
   const isOverpaid = dueVal < 0;
+  const calendarProps = { month, currentMonthLabel, calendarDays, getMealCellClass, getMealCellGuestStyle, isLocked, setSelectedDay };
 
   return (
     <div className="h-full flex flex-col overflow-y-auto overflow-x-hidden animate-fade-in">
 
       {/* ── Shared heading strip — spans both columns ─────────────── */}
-      <HeadingStrip />
+      <div className="flex-shrink-0 flex items-end justify-between px-5 sm:px-8 md:px-12 pt-7 md:pt-8 pb-6">
+        <div className="flex flex-col gap-2.5">
+          <p className="text-xs font-medium" style={{ color: '#475569' }}>
+            {month?.label === currentMonthLabel
+              ? format(today, 'EEEE, MMMM d, yyyy')
+              : month ? getMonthLabel(month.label) : ''}
+          </p>
+          <h1 className="text-2xl font-bold leading-tight" style={{ color: '#f1f5f9' }}>
+            Hey, <span style={{ color: '#a78bfa' }}>{profile?.username}</span>
+          </h1>
+          <div className="flex flex-wrap items-center gap-2.5 mt-1.5">
+            {months.length > 0 && (
+              <div className="relative">
+                <select
+                  value={selectedMonthId}
+                  onChange={e => setSelectedMonthId(e.target.value)}
+                  className="bg-[#0d1220] text-slate-300 text-xs font-semibold pl-3 pr-7 py-2 rounded-xl border border-white/10 appearance-none cursor-pointer hover:border-violet-500/40 transition-colors focus:outline-none focus:border-violet-500/60"
+                  style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
+                >
+                  {months.map(m => (
+                    <option key={m.id} value={m.id}>{getMonthLabel(m.label)}</option>
+                  ))}
+                </select>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                  <svg width="9" height="5" viewBox="0 0 10 6" fill="none">
+                    <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+              </div>
+            )}
+
+            {/* On Mobile: Round Circular Icon Buttons aligned right beside the Month Box */}
+            <div className="md:hidden flex items-center gap-2">
+              {!isLocked && (
+                <button
+                  id="add-expense-mobile-heading"
+                  onClick={() => setShowAddExpense(true)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all active:scale-90"
+                  style={{
+                    background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                    boxShadow: '0 0 12px rgba(124,58,237,0.5)',
+                  }}
+                  aria-label="Add Expense"
+                >
+                  <LucidePlus size={16} strokeWidth={2.5} />
+                </button>
+              )}
+              <button
+                id="calc-mobile-heading"
+                onClick={() => setShowCalculator(true)}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-white transition-all active:scale-90"
+                style={{
+                  background: 'linear-gradient(135deg, #0ea5e9 0%, #0891b2 100%)',
+                  boxShadow: '0 0 12px rgba(14,165,233,0.5)',
+                }}
+                aria-label="Calculator"
+              >
+                <CalculatorIcon size={15} strokeWidth={1.8} />
+              </button>
+            </div>
+
+            {isLocked && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full"
+                style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.25)' }}>
+                <IconLock size={11} />
+                Closed
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* ── Two equal columns, both starting at the same Y ───────── */}
       <div className="flex w-full">
@@ -481,6 +478,18 @@ export default function DashboardPage() {
           }}
         />
       )}
+      {/* ── Expense & Calculator Modals ────────────────────────────── */}
+      {showAddExpense && month && (
+        <ExpenseForm
+          monthId={month.id}
+          onClose={() => setShowAddExpense(false)}
+          onSaved={() => { setShowAddExpense(false); fetchData(); }}
+        />
+      )}
+
+      {showCalculator && (
+        <Calculator onClose={() => setShowCalculator(false)} />
+      )}
     </div>
   );
 }
@@ -495,6 +504,7 @@ function MealCalendar({
   getMealCellClass: (count: number, isFuture: boolean, isLocked: boolean) => string;
   getMealCellGuestStyle: (count: number, guestCount: number, isFuture: boolean, isLocked: boolean) => React.CSSProperties | undefined;
   isLocked: boolean;
+  setSelectedDay: (day: string) => void;
 }) {
   const firstDayOffset = month ? new Date(`${month.label}-01`).getDay() : 0;
   const totalCells = firstDayOffset + calendarDays.length;
