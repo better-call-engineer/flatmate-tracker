@@ -92,7 +92,7 @@ export default function ServersPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 pb-28 md:pb-8 animate-fade-in max-w-2xl mx-auto space-y-6">
+    <div className="h-full overflow-y-auto no-scrollbar px-5 sm:px-8 md:px-12 pt-7 md:pt-8 pb-6 animate-fade-in space-y-6">
       
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -126,7 +126,7 @@ export default function ServersPage() {
                 No movie servers configured.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {movieServers.map(server => renderServerCard(server))}
               </div>
             )}
@@ -147,7 +147,7 @@ export default function ServersPage() {
                 No TV servers configured.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {tvServers.map(server => renderServerCard(server))}
               </div>
             )}

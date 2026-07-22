@@ -10,9 +10,9 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import { Plus, Trash2, Lock, Filter, Pencil, Calculator as CalculatorIcon } from 'lucide-react';
 import ExpenseForm from '@/components/ExpenseForm';
+import Calculator from '@/components/Calculator';
 import { useSelectedMonth } from '@/contexts/MonthContext';
 import { CategoryIcon } from '@/components/GeometricIcons';
-import Calculator from '@/components/Calculator';
 
 export default function ExpensesPage() {
   const { profile } = useAuth();
@@ -21,11 +21,11 @@ export default function ExpensesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const [editExpense, setEditExpense] = useState<import('@/lib/types').Expense | null>(null);
   const [filterCategory, setFilterCategory] = useState<string>('my_expenses');
   const [loading, setLoading] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [showCalculator, setShowCalculator] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!selectedMonthId) return;
@@ -128,21 +128,18 @@ export default function ExpensesPage() {
   const isLocked = month?.is_closed;
 
   return (
-    <div className="p-4 md:p-6 pb-28 md:pb-8 animate-fade-in max-w-2xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Expenses</h1>
-          <p className="text-text-muted text-sm">
-            {month ? format(parseISO(`${month.label}-01`), 'MMMM yyyy') : ''}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {months.length > 1 && (
+    <div className="h-full overflow-y-auto no-scrollbar px-5 sm:px-8 md:px-12 pt-7 md:pt-8 pb-6 animate-fade-in">
+      <div className="flex flex-col gap-3 mb-6">
+        <h1 className="text-2xl font-bold" style={{ color: '#f1f5f9' }}>Expenses</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Month selector box */}
+          {months.length > 0 && (
             <div className="relative">
               <select
                 value={selectedMonthId}
                 onChange={e => setSelectedMonthId(e.target.value)}
-                className="bg-[#0a0f1a] text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-white/10 appearance-none pr-8 cursor-pointer hover:border-violet-500/50 transition-colors focus:outline-none"
+                className="bg-[#0d1220] text-slate-300 text-xs font-semibold pl-3 pr-8 py-2 rounded-xl border border-white/10 appearance-none cursor-pointer hover:border-violet-500/40 transition-colors focus:outline-none focus:border-violet-500/60"
+                style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}
               >
                 {months.map(m => (
                   <option key={m.id} value={m.id}>
@@ -157,20 +154,41 @@ export default function ExpensesPage() {
               </div>
             </div>
           )}
+
+          {/* Add Expense button */}
           {!isLocked && (
             <button
               id="expenses-add-btn"
               onClick={() => setShowForm(true)}
-              className="btn-primary flex items-center gap-2 text-sm"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95"
+              style={{
+                background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                boxShadow: '0 0 12px rgba(124,58,237,0.4)',
+              }}
             >
               <Plus className="w-4 h-4" />
-              Add
+              Add Expense
             </button>
           )}
+
+          {/* Calculator button */}
+          <button
+            id="expenses-calc-btn"
+            onClick={() => setShowCalculator(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-all active:scale-95"
+            style={{
+              background: 'linear-gradient(135deg, #0ea5e9 0%, #0891b2 100%)',
+              boxShadow: '0 0 12px rgba(14,165,233,0.4)',
+            }}
+          >
+            <CalculatorIcon className="w-4 h-4" />
+            Calculator
+          </button>
+
           {isLocked && (
-            <div className="flex items-center gap-1.5 bg-muted-light text-muted text-xs font-semibold px-3 py-1.5 rounded-full">
-              <Lock className="w-3 h-3" />
-              Locked
+            <div className="flex items-center gap-1.5 bg-rose-500/10 text-rose-400 text-xs font-semibold px-3 py-1.5 rounded-full border border-rose-500/20">
+              <Lock className="w-3.5 h-3.5" />
+              Closed
             </div>
           )}
         </div>
@@ -212,149 +230,36 @@ export default function ExpensesPage() {
         ))}
       </div>
 
-      {/* Expense list */}
+      {/* Expense list — Bento Tile Grid concept matching Activity page */}
       {loading ? (
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => <div key={i} className="skeleton h-20 rounded-2xl" />)}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 animate-pulse">
+          {[...Array(8)].map((_, i) => <div key={i} className="skeleton h-36 rounded-2xl" />)}
         </div>
       ) : filteredExpenses.length === 0 ? (
-        <div className="text-center py-12 text-text-muted">
-          <p className="text-4xl mb-2">📋</p>
-          <p className="font-medium">No expenses yet</p>
-          <p className="text-sm">Tap &quot;Add&quot; to log the first one</p>
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: '#475569' }}>
+            <Filter size={24} />
+          </div>
+          <p className="font-semibold text-sm text-slate-300">No expenses found</p>
+          <p className="text-xs text-slate-500">Tap &quot;Add&quot; to log an expense for this month</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredExpenses.map(expense => {
-            const paidDetails = expense.paid_by_details as Record<string, number> | null;
-            const hasSplitPay = paidDetails && Object.keys(paidDetails).length > 1;
-
-            const paidByProfile = profileMap.get(expense.paid_by);
-            const isMyExpense = expense.paid_by === profile?.id || (paidDetails && profile && paidDetails[profile.id] > 0);
-            const splitDetails = expense.split_details as Record<string, number>;
-
-            return (
-              <div key={expense.id} className="card hover:shadow-card-hover transition-all duration-200">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-background flex items-center justify-center text-lg flex-shrink-0 text-violet-400">
-                    <CategoryIcon category={expense.category} size={18} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-text-primary text-sm">
-                          {CATEGORY_LABELS[expense.category as keyof typeof CATEGORY_LABELS]}
-                        </p>
-                        {expense.description && (
-                          <p className="text-text-muted text-xs truncate">{expense.description}</p>
-                        )}
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="font-bold text-text-primary">{formatBDT(expense.amount)}</p>
-                        {(expense.paid_full || (paidDetails && Object.keys(paidDetails).length === 1)) && (
-                          <span className="text-xs text-active font-medium">Paid full</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      {hasSplitPay ? (
-                        <div className="flex -space-x-1.5 overflow-hidden">
-                          {Object.keys(paidDetails).map(uid => {
-                            const p = profileMap.get(uid);
-                            return (
-                              <div
-                                key={uid}
-                                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold ring-1 ring-[#0d1220] flex-shrink-0"
-                                style={{ backgroundColor: p?.avatar_color ?? '#334155' }}
-                                title={`${p?.username}: ${formatBDT(paidDetails[uid])}`}
-                              >
-                                {p?.username.charAt(0).toUpperCase()}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div
-                          className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
-                          style={{ backgroundColor: paidByProfile?.avatar_color }}
-                        >
-                          {paidByProfile?.username.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <span className="text-text-muted text-xs">
-                        {hasSplitPay
-                          ? Object.keys(paidDetails).map(uid => `${profileMap.get(uid)?.username} (${formatBDT(paidDetails[uid])})`).join(' + ')
-                          : paidByProfile?.username
-                        }
-                        {expense.category === 'grocery'
-                          ? ' · Grocery'
-                          : expense.split_type === 'custom'
-                            ? ' · Custom split'
-                            : ` · ÷ ${Object.keys(splitDetails).filter(k => splitDetails[k] > 0).length}`}
-                      </span>
-                      <span className="text-text-muted text-xs ml-auto">
-                        {format(parseISO(expense.created_at), 'MMM d, h:mm a')}
-                      </span>
-                    </div>
-                  </div>
-                  {(isMyExpense || profile?.role === 'admin') && !isLocked && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => { setEditExpense(expense); setShowForm(true); }}
-                        className="text-text-muted hover:text-sky-400 transition-colors p-1"
-                        title="Edit expense"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirmId(expense.id)}
-                        className="text-text-muted hover:text-negative transition-colors p-1"
-                        title="Delete expense"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {filteredExpenses.map(expense => (
+            <ExpenseTile
+              key={expense.id}
+              expense={expense}
+              profileMap={profileMap}
+              profile={profile}
+              isLocked={isLocked}
+              onEdit={e => { setEditExpense(e); setShowForm(true); }}
+              onDelete={id => setDeleteConfirmId(id)}
+            />
+          ))}
         </div>
       )}
 
-      {/* FABs */}
-      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
-        {!isLocked && (
-          <button
-            id="expenses-fab"
-            onClick={() => setShowForm(true)}
-            className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 active:scale-95 text-white hover:scale-105"
-            style={{
-              background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
-              boxShadow: '0 4px 20px rgba(124,58,237,0.6), 0 0 40px rgba(124,58,237,0.2)',
-            }}
-            aria-label="Add Expense"
-          >
-            <Plus className="w-6 h-6" />
-          </button>
-        )}
-        <button
-          id="calculator-fab"
-          onClick={() => setShowCalculator(true)}
-          className="w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 active:scale-95 text-white hover:scale-105"
-          style={{
-            background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
-            boxShadow: '0 4px 20px rgba(14,165,233,0.6), 0 0 40px rgba(14,165,233,0.2)',
-          }}
-          aria-label="Calculator"
-        >
-          <CalculatorIcon className="w-6 h-6" />
-        </button>
-      </div>
-
-      {showCalculator && (
-        <Calculator onClose={() => setShowCalculator(false)} />
-      )}
 
       {(showForm || editExpense) && month && (
         <ExpenseForm
@@ -413,6 +318,148 @@ export default function ExpensesPage() {
           </div>
         </div>
       )}
+
+      {showCalculator && (
+        <Calculator onClose={() => setShowCalculator(false)} />
+      )}
+    </div>
+  );
+}
+
+// ── Expense Tile Component (Bento Grid Concept) ──────────────────────────────
+function ExpenseTile({
+  expense,
+  profileMap,
+  profile,
+  isLocked,
+  onEdit,
+  onDelete,
+}: {
+  expense: Expense;
+  profileMap: Map<string, Profile>;
+  profile: Profile | null;
+  isLocked?: boolean;
+  onEdit: (e: Expense) => void;
+  onDelete: (id: string) => void;
+}) {
+  const paidDetails = expense.paid_by_details as Record<string, number> | null;
+  const hasSplitPay = paidDetails && Object.keys(paidDetails).length > 1;
+  const paidByProfile = profileMap.get(expense.paid_by);
+  const isMyExpense = expense.paid_by === profile?.id || (paidDetails && profile && paidDetails[profile.id] > 0);
+  const splitDetails = (expense.split_details as Record<string, number>) || {};
+
+  const accentColor = '#a78bfa';
+  const accentBg = 'rgba(167,139,250,0.06)';
+  const accentBorder = 'rgba(167,139,250,0.15)';
+
+  return (
+    <div
+      className="rounded-2xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 hover:translate-y-[-2px] relative overflow-hidden group"
+      style={{
+        background: accentBg,
+        border: `1px solid ${accentBorder}`,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}
+    >
+      {/* Decorative radial glow */}
+      <div className="absolute top-0 right-0 w-20 h-20 pointer-events-none opacity-20 transition-opacity group-hover:opacity-30"
+        style={{ background: 'radial-gradient(circle at top right, rgba(167,139,250,0.4) 0%, transparent 70%)' }} />
+
+      {/* Top Row: Category badge + Edit/Delete actions */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.25)', color: '#c4b5fd' }}>
+            <CategoryIcon category={expense.category} size={15} />
+          </div>
+          <div>
+            <h3 className="font-bold text-xs capitalize text-slate-100">
+              {CATEGORY_LABELS[expense.category as keyof typeof CATEGORY_LABELS] ?? expense.category}
+            </h3>
+            <span className="text-[10px] text-slate-500 font-medium">
+              {expense.category === 'grocery'
+                ? 'Grocery'
+                : expense.split_type === 'custom'
+                  ? 'Custom split'
+                  : `÷ ${Object.keys(splitDetails).filter(k => splitDetails[k] > 0).length}`}
+            </span>
+          </div>
+        </div>
+
+        {/* Edit / Delete actions */}
+        {(isMyExpense || profile?.role === 'admin') && !isLocked && (
+          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onEdit(expense)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-purple-300 hover:bg-purple-500/20 transition-colors"
+              title="Edit expense"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => onDelete(expense.id)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-colors"
+              title="Delete expense"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Description if present */}
+      {expense.description && (
+        <p className="text-xs text-slate-400 line-clamp-2">{expense.description}</p>
+      )}
+
+      {/* Bottom Row: Payer Avatar & Names + Amount */}
+      <div className="pt-2.5 border-t border-white/5 flex items-end justify-between gap-2">
+        {/* Payer info */}
+        <div className="flex items-center gap-2 min-w-0">
+          {hasSplitPay ? (
+            <div className="flex -space-x-1.5 overflow-hidden flex-shrink-0">
+              {Object.keys(paidDetails!).map(uid => {
+                const p = profileMap.get(uid);
+                return (
+                  <div
+                    key={uid}
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ring-1 ring-[#0d1220] flex-shrink-0"
+                    style={{ backgroundColor: p?.avatar_color ?? '#334155' }}
+                    title={`${p?.username}: ${formatBDT(paidDetails![uid])}`}
+                  >
+                    {p?.username.charAt(0).toUpperCase()}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+              style={{ backgroundColor: paidByProfile?.avatar_color ?? '#334155' }}
+            >
+              {paidByProfile?.username.charAt(0).toUpperCase() ?? '?'}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold text-slate-300 truncate">
+              {hasSplitPay
+                ? Object.keys(paidDetails!).map(uid => profileMap.get(uid)?.username).join(' + ')
+                : paidByProfile?.username ?? 'Unknown'}
+            </p>
+            <p className="text-[9px] text-slate-500">
+              {format(parseISO(expense.created_at), 'MMM d, h:mm a')}
+            </p>
+          </div>
+        </div>
+
+        {/* Amount */}
+        <div className="text-right flex-shrink-0">
+          <p className="text-base font-extrabold text-white tracking-tight">{formatBDT(expense.amount)}</p>
+          {(expense.paid_full || (paidDetails && Object.keys(paidDetails).length === 1)) && (
+            <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider">Paid full</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -45,6 +45,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // ── Immediately resolve session on mount (fixes blank-screen-on-load) ──
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        await fetchProfile(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    // ── Also subscribe to future auth changes ──
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         try {
@@ -57,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
           console.error('Error in auth state change:', err);
         } finally {
+          // Only set loading false here for subsequent changes (initial is above)
           setLoading(false);
         }
       }

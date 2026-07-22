@@ -50,7 +50,7 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 pb-28 md:pb-8 animate-fade-in max-w-2xl mx-auto space-y-6">
+    <div className="h-full overflow-y-auto no-scrollbar px-5 sm:px-8 md:px-12 pt-7 md:pt-8 pb-6 animate-fade-in space-y-6">
       
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -87,7 +87,7 @@ export default function ContactsPage() {
             No flatmate contacts found.
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {flatmates.map(contact => (
               <ContactCard key={contact.id} contact={contact} />
             ))}
@@ -107,7 +107,7 @@ export default function ContactsPage() {
             No other contacts found.
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {otherContacts.map(contact => (
               <ContactCard key={contact.id} contact={contact} />
             ))}
@@ -119,50 +119,72 @@ export default function ContactsPage() {
 }
 
 function ContactCard({ contact }: { contact: Contact }) {
+  const isFlatmate = contact.is_flatmate;
+  const accentBg = isFlatmate ? 'rgba(167,139,250,0.06)' : 'rgba(6,182,212,0.06)';
+  const accentBorder = isFlatmate ? 'rgba(167,139,250,0.15)' : 'rgba(6,182,212,0.15)';
+
   return (
-    <div className="bento-card p-4 flex items-center justify-between gap-4 transition-all duration-200 hover:translate-y-[-1px]">
-      <div className="flex items-center gap-3.5 min-w-0">
-        {/* Avatar */}
+    <div
+      className="rounded-2xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 hover:translate-y-[-2px] relative overflow-hidden group"
+      style={{
+        background: accentBg,
+        border: `1px solid ${accentBorder}`,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}
+    >
+      {/* Decorative radial glow */}
+      <div className="absolute top-0 right-0 w-20 h-20 pointer-events-none opacity-20 transition-opacity group-hover:opacity-30"
+        style={{
+          background: isFlatmate
+            ? 'radial-gradient(circle at top right, rgba(167,139,250,0.4) 0%, transparent 70%)'
+            : 'radial-gradient(circle at top right, rgba(103,232,249,0.4) 0%, transparent 70%)',
+        }}
+      />
+
+      {/* Top Row: Avatar & Tag */}
+      <div className="flex items-center justify-between">
         <div 
           className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
           style={{
-            background: contact.is_flatmate ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : 'linear-gradient(135deg, #0891b2, #06b6d4)',
-            boxShadow: contact.is_flatmate ? '0 0 12px rgba(124,58,237,0.3)' : '0 0 12px rgba(6,182,212,0.3)',
+            background: isFlatmate ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : 'linear-gradient(135deg, #0891b2, #06b6d4)',
+            boxShadow: isFlatmate ? '0 0 12px rgba(124,58,237,0.4)' : '0 0 12px rgba(6,182,212,0.4)',
           }}
         >
           {contact.name.charAt(0).toUpperCase()}
         </div>
 
-        <div className="min-w-0">
-          <h3 className="font-bold text-sm text-slate-100 truncate">{contact.name}</h3>
-          <span 
-            className="inline-block text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full mt-1 border"
-            style={contact.is_flatmate ? {
-              background: 'rgba(124,58,237,0.1)',
-              borderColor: 'rgba(124,58,237,0.2)',
-              color: '#c4b5fd',
-            } : {
-              background: 'rgba(6,182,212,0.1)',
-              borderColor: 'rgba(6,182,212,0.2)',
-              color: '#67e8f9',
-            }}
-          >
-            {contact.tag}
-          </span>
-        </div>
+        <span 
+          className="text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full border"
+          style={isFlatmate ? {
+            background: 'rgba(124,58,237,0.1)',
+            borderColor: 'rgba(124,58,237,0.2)',
+            color: '#c4b5fd',
+          } : {
+            background: 'rgba(6,182,212,0.1)',
+            borderColor: 'rgba(6,182,212,0.2)',
+            color: '#67e8f9',
+          }}
+        >
+          {contact.tag}
+        </span>
+      </div>
+
+      {/* Name */}
+      <div>
+        <h3 className="font-bold text-sm text-slate-100 truncate">{contact.name}</h3>
       </div>
 
       {/* Phone numbers list */}
-      <div className="flex flex-col gap-1.5 flex-shrink-0 items-end">
+      <div className="pt-2.5 border-t border-white/5 flex flex-wrap gap-1.5">
         {contact.phone_numbers.map((phone, idx) => (
           <a
             key={idx}
             href={`tel:${phone}`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all duration-150 active:scale-95 hover:bg-slate-800"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-all duration-150 active:scale-95 hover:bg-slate-800"
             style={{
               background: 'rgba(255,255,255,0.03)',
-              borderColor: 'rgba(255,255,255,0.06)',
-              color: '#94a3b8',
+              borderColor: 'rgba(255,255,255,0.08)',
+              color: '#cbd5e1',
             }}
           >
             <Phone size={11} className="text-emerald-400" />

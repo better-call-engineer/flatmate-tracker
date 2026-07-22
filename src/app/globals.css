@@ -14,13 +14,14 @@
   html {
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    height: 100%;
   }
 
   body {
     font-family: 'Space Grotesk', system-ui, sans-serif;
     background-color: #080c14;
     color: #f1f5f9;
-    min-height: 100vh;
+    height: 100%;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     /* Subtle grid pattern overlay */
@@ -198,7 +199,7 @@
      MEAL CELLS (dark theme)
   ═══════════════════════════════════ */
   .meal-cell {
-    @apply rounded-lg w-full aspect-square flex items-center justify-center
+    @apply rounded-xl w-full aspect-square flex items-center justify-center
            text-xs font-semibold cursor-pointer transition-all duration-150
            select-none relative;
   }
@@ -320,6 +321,34 @@
     border: 1px solid rgba(244,63,94,0.25);
     color: #fda4af;
   }
+
+  /* ═══════════════════════════════════
+     NO SCROLLBAR UTILITY
+  ═══════════════════════════════════ */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ═══════════════════════════════════
+     HAMBURGER DRAWER OVERLAY
+  ═══════════════════════════════════ */
+  .drawer-overlay {
+    animation: fadeIn 0.2s ease-out;
+  }
+  .drawer-panel {
+    animation: slideInLeft 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ═══════════════════════════════════
+     PAGE CONTENT (full-height scroll)
+  ═══════════════════════════════════ */
+  .page-scroll {
+    @apply h-full overflow-y-auto no-scrollbar;
+  }
 }
 
 /* ═══════════════════════════════════
@@ -350,7 +379,7 @@
 /* ═══════════════════════════════════
    PAGE TRANSITIONS
 ═══════════════════════════════════ */
-.page-enter { animation: fadeIn 0.4s ease-out; }
+.page-enter { animation: fadeIn 0.3s ease-out; }
 
 /* ═══════════════════════════════════
    SIDEBAR ACTIVE NAV ITEM
@@ -372,6 +401,29 @@
     linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
   background-size: 80px 80px, 80px 80px, 20px 20px, 20px 20px;
+}
+
+/* ═══════════════════════════════════
+   KEYFRAME ANIMATIONS
+═══════════════════════════════════ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }
 
 /* ═══════════════════════════════════
