@@ -79,6 +79,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    // Clear persisted month so next sign-in defaults to the current month
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('flatmate_selectedMonthId');
+    }
   };
 
   return (

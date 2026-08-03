@@ -46,11 +46,43 @@ export default function MonthManagerPage() {
     setProfiles(profRes.data ?? []);
     setExpenses(expRes.data ?? []);
     setMeals(mealRes.data ?? []);
-    setSettlements(settleRes.data ?? []);
+    
+    const latestMonth = monthsData.sort((a, b) => b.label.localeCompare(a.label))[0];
+    if (latestMonth) {
+        setCurrentMonth(latestMonth);
+        const [profRes, expRes, mealRes, settleRes] = await Promise.all([
+          (supabase as any).from('profiles').select('*').eq('status', 'active'),
+          (supabase as any).from('expenses').select('*').eq('month_id', latestMonth.id),
+          (supabase as any).from('meals').select('*').eq('month_id', latestMonth.id),
+          (supabase as any).from('settlements').select('*').eq('month_id', latestMonth.id),
+        ]);
+
+        setProfiles(profRes.data ?? []);
+        setExpenses(expRes.data ?? []);
+        setMeals(mealRes.data ?? []);
+        setSettlements(settleRes.data ?? []);
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Re-fetch expenses/meals/settlements when selected month changes
+  const handleMonthChange = useCallback(async (monthId: string) => {
+    const selected = months.find(m => m.id === monthId);
+    if (!selected) return;
+    setCurrentMonth(selected);
+
+    const [expRes, mealRes, settleRes] = await Promise.all([
+      (supabase as any).from('expenses').select('*').eq('month_id', monthId),
+      (supabase as any).from('meals').select('*').eq('month_id', monthId),
+      (supabase as any).from('settlements').select('*').eq('month_id', monthId),
+    ]);
+
+    setExpenses(expRes.data ?? []);
+    setMeals(mealRes.data ?? []);
+    setSettlements(settleRes.data ?? []);
+  }, [months]);
 
   const openingBalances = (currentMonth?.opening_balances as Record<string, number>) ?? {};
   const balances = calculateBalances(expenses, meals, profiles, openingBalances);
@@ -78,17 +110,39 @@ export default function MonthManagerPage() {
         closed_at: new Date().toISOString(),
       }).eq('id', currentMonth.id);
 
-      // Create new month with carry-forward
+      // Create or update next month with carry-forward balances
       const nextMonthDate = addMonths(parseISO(`${currentMonth.label}-01`), 1);
       const nextLabel = format(nextMonthDate, 'yyyy-MM');
 
-      const { data: nextMonthData, error: nextMonthError } = await (supabase as any).from('months').insert({
-        label: nextLabel,
-        is_closed: false,
-        opening_balances: carryForward,
-      }).select().single();
+      // Check if the next month already exists
+      const { data: existingNext } = await (supabase as any)
+        .from('months')
+        .select('id')
+        .eq('label', nextLabel)
+        .maybeSingle();
 
-      if (nextMonthError) throw nextMonthError;
+      let nextMonthData: any;
+      if (existingNext) {
+        // Next month already exists — just update its opening balances
+        const { data, error } = await (supabase as any)
+          .from('months')
+          .update({ opening_balances: carryForward })
+          .eq('id', existingNext.id)
+          .select()
+          .single();
+        if (error) throw error;
+        nextMonthData = data;
+      } else {
+        // Next month doesn't exist — create it
+        const { data, error } = await (supabase as any)
+          .from('months')
+          .insert({ label: nextLabel, is_closed: false, opening_balances: carryForward })
+          .select()
+          .single();
+        if (error) throw error;
+        nextMonthData = data;
+      }
+
 
       // Copy fixed overheads
       if (fixedRes.data && fixedRes.data.length > 0) {
@@ -157,11 +211,35 @@ export default function MonthManagerPage() {
         <p className="text-text-muted text-sm">Manage billing cycles and settlements</p>
       </div>
 
+      {/* Month selector */}
+      <div className="card mb-4">
+        <label className="text-text-muted text-xs font-semibold uppercase tracking-wider mb-2 block">
+          Select Month to Manage
+        </label>
+        <select
+          id="admin-month-select"
+          value={currentMonth?.id ?? ''}
+          onChange={e => handleMonthChange(e.target.value)}
+          className="w-full rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2"
+          style={{
+            background: '#0d1220',
+            border: '1px solid rgba(255,255,255,0.1)',
+            color: '#f1f5f9',
+          }}
+        >
+          {months.map(m => (
+            <option key={m.id} value={m.id}>
+              {getMonthLabel(m.label)} {m.is_closed ? '(Closed)' : '(Open)'}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Current month status */}
       <div className={`card mb-4 border-2 ${isCurrentClosed ? 'border-muted/30 bg-muted-light' : 'border-primary/20 bg-primary-light'}`}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-text-muted text-xs font-medium">Current Month</p>
+            <p className="text-text-muted text-xs font-medium">Selected Month</p>
             <h2 className="text-xl font-bold text-text-primary">
               {currentMonth ? getMonthLabel(currentMonth.label) : '—'}
             </h2>
@@ -307,4 +385,3 @@ export default function MonthManagerPage() {
     </div>
   );
 }
-
