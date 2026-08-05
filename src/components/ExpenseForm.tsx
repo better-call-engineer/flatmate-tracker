@@ -12,8 +12,10 @@ import {
 import { getOrCreateCurrentMonth } from '@/lib/finance';
 import { computeEvenSplit, computeCustomSplit } from '@/lib/finance';
 import { toast } from 'sonner';
-import { X, ChevronDown, ChevronUp, AlertCircle, Scale, Edit3, Loader2, Coins } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, AlertCircle, Scale, Edit3, Loader2, Coins, Calendar } from 'lucide-react';
 import { CategoryIcon } from '@/components/GeometricIcons';
+import { useSelectedMonth } from '@/contexts/MonthContext';
+import { format, getDaysInMonth, parseISO } from 'date-fns';
 
 interface Props {
   onClose: () => void;
@@ -22,8 +24,83 @@ interface Props {
   editExpense?: Expense;
 }
 
+// ─── Grocery Date Picker ─────────────────────────────────────────────────────
+function GroceryDatePicker({
+  monthLabel,
+  selectedDate,
+  onSelect,
+}: {
+  monthLabel: string;
+  selectedDate: string;
+  onSelect: (date: string) => void;
+}) {
+  const [year, month] = monthLabel.split('-').map(Number);
+  const daysInMonth = getDaysInMonth(new Date(year, month - 1));
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
+  const dayLabels = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+  return (
+    <div
+      className="rounded-2xl p-4 space-y-3"
+      style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}
+    >
+      <p className="text-xs font-bold uppercase tracking-wider text-center" style={{ color: '#7c3aed' }}>
+        {format(new Date(year, month - 1), 'MMMM yyyy')}
+      </p>
+      <div className="grid grid-cols-7 gap-1">
+        {dayLabels.map(d => (
+          <div key={d} className="text-center text-[10px] font-bold" style={{ color: '#334155' }}>{d}</div>
+        ))}
+        {Array.from({ length: firstDayOfWeek }).map((_, i) => <div key={`blank-${i}`} />)}
+        {Array.from({ length: daysInMonth }).map((_, i) => {
+          const day = i + 1;
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const isSelected = dateStr === selectedDate;
+          const isTodayDate = dateStr === today;
+          const isFuture = dateStr > today;
+          return (
+            <button
+              key={day}
+              type="button"
+              disabled={isFuture}
+              onClick={() => onSelect(dateStr)}
+              className="aspect-square rounded-lg flex items-center justify-center text-xs font-medium transition-all duration-100 active:scale-90"
+              style={
+                isSelected
+                  ? { background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', boxShadow: '0 0 10px rgba(124,58,237,0.5)', fontWeight: 700 }
+                  : isTodayDate
+                  ? { background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.3)' }
+                  : isFuture
+                  ? { color: '#1e293b', cursor: 'not-allowed' }
+                  : { color: '#64748b' }
+              }
+              onMouseEnter={e => {
+                if (!isSelected && !isFuture) {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)';
+                  (e.currentTarget as HTMLButtonElement).style.color = '#cbd5e1';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!isSelected && !isFuture) {
+                  (e.currentTarget as HTMLButtonElement).style.background = isTodayDate ? 'rgba(124,58,237,0.15)' : '';
+                  (e.currentTarget as HTMLButtonElement).style.color = isTodayDate ? '#a78bfa' : '#64748b';
+                }
+              }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ExpenseForm ────────────────────────────────────────────────────────
 export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: Props) {
   const { profile } = useAuth();
+  const { selectedMonth, currentMonthLabel } = useSelectedMonth();
   const isEditing = !!editExpense;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [category, setCategory] = useState<ExpenseCategory>(editExpense?.category as ExpenseCategory ?? 'misc');
@@ -33,6 +110,22 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
   const [splitType, setSplitType] = useState<'even' | 'custom' | 'fixed' | 'deposit'>(editExpense?.split_type ?? 'even');
   const [includedUsers, setIncludedUsers] = useState<Set<string>>(new Set());
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+
+  // Grocery-specific date state
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const activeMonthLabel = selectedMonth?.label ?? currentMonthLabel;
+  const defaultGroceryDate = (() => {
+    if (todayStr.startsWith(activeMonthLabel)) return todayStr;
+    const [y, m] = activeMonthLabel.split('-').map(Number);
+    const lastDay = getDaysInMonth(new Date(y, m - 1));
+    return `${activeMonthLabel}-${String(lastDay).padStart(2, '0')}`;
+  })();
+  const [groceryDate, setGroceryDate] = useState<string>(
+    editExpense ? format(parseISO(editExpense.created_at), 'yyyy-MM-dd') : defaultGroceryDate
+  );
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showAdvancePayOptions, setShowAdvancePayOptions] = useState(!!editExpense);
+  const isGrocery = category === 'grocery';
 
   // Auto-calculate total amount when in Fixed mode
   useEffect(() => {
@@ -230,6 +323,7 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
       }
 
       if (isEditing && editExpense) {
+        const timePart = editExpense.created_at ? format(parseISO(editExpense.created_at), 'HH:mm:ss') : format(new Date(), 'HH:mm:ss');
         const { error } = await (supabase as any).from('expenses').update({
           paid_by: finalPaidBy,
           category,
@@ -239,12 +333,13 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
           split_type: finalSplitType,
           split_details: splitDetails,
           paid_by_details: finalPaidByDetails,
+          created_at: `${groceryDate}T${timePart}+06:00`
         }).eq('id', editExpense.id);
         if (error) throw error;
         toast.success('Expense updated!');
       } else {
         const currentMonthId = monthId || (await getOrCreateCurrentMonth()).id;
-        const { error } = await (supabase as any).from('expenses').insert({
+        const insertPayload: Record<string, unknown> = {
           month_id: currentMonthId,
           paid_by: finalPaidBy,
           category,
@@ -254,7 +349,9 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
           split_type: finalSplitType,
           split_details: splitDetails,
           paid_by_details: finalPaidByDetails,
-        });
+          created_at: `${groceryDate}T${format(new Date(), 'HH:mm:ss')}+06:00`
+        };
+        const { error } = await (supabase as any).from('expenses').insert(insertPayload);
         if (error) throw error;
         toast.success('Expense added!');
       }
@@ -406,58 +503,196 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
             </div>
           </div>
 
-          {/* Amount */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center">
-              <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-amount">
-                Amount (৳)
-              </label>
-              {splitType === 'fixed' && (
-                <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
-                  Auto-calculated from split sums
-                </span>
-              )}
-            </div>
-            <input
-              id="expense-amount"
-              type="number"
-              min="1"
-              step="1"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              placeholder="0.00"
-              disabled={splitType === 'fixed'}
-              className="input text-xl font-bold"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: '#f1f5f9',
-              }}
-              required
-            />
-          </div>
+          {/* ── GROCERY: simplified 3-field form ── */}
+          {isGrocery ? (
+            <>
+              {/* Amount */}
+              <div className="space-y-1.5">
+                <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-amount">
+                  Amount (BDT)
+                </label>
+                <input
+                  id="expense-amount" type="number" min="1" step="1"
+                  value={amount} onChange={e => setAmount(e.target.value)}
+                  placeholder="0" autoFocus required
+                  className="input text-xl font-bold"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#f1f5f9' }}
+                />
+              </div>
 
-          {/* Description */}
-          <div className="space-y-1.5">
-            <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-desc">
-              Description <span className="text-text-muted font-normal lowercase">(optional)</span>
-            </label>
-            <input
-              id="expense-desc"
-              type="text"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="e.g. Monthly rent payment"
-              className="input"
-              style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: '#f1f5f9',
-              }}
-            />
-          </div>
+              {/* Description */}
+              <div className="space-y-1.5">
+                <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-desc">
+                  Description <span className="text-text-muted font-normal lowercase">(optional)</span>
+                </label>
+                <input
+                  id="expense-desc" type="text"
+                  value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="e.g. Weekly bazar run"
+                  className="input"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#f1f5f9' }}
+                />
+              </div>
 
-          {/* Paid By */}
+              {/* Date */}
+              <div className="space-y-2">
+                <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block">
+                  Date
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowDatePicker(prev => !prev)}
+                  className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all active:scale-[0.99]"
+                  style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: showDatePicker ? '1px solid rgba(124,58,237,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                    color: '#f1f5f9',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Calendar size={15} style={{ color: '#7c3aed' }} />
+                    <span className="text-sm font-medium">
+                      {format(parseISO(groceryDate), 'd MMM yyyy')}
+                    </span>
+                    {groceryDate === todayStr && (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{
+                          background: 'rgba(16,185,129,0.15)',
+                          color: '#10b981',
+                          border: '1px solid rgba(16,185,129,0.3)',
+                        }}
+                      >
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    className={`transition-transform duration-200 ${showDatePicker ? 'rotate-180 text-[#a78bfa]' : 'text-slate-400'}`}
+                  />
+                </button>
+
+                {showDatePicker && (
+                  <div className="animate-fade-in pt-1">
+                    <GroceryDatePicker
+                      monthLabel={activeMonthLabel}
+                      selectedDate={groceryDate}
+                      onSelect={(d) => {
+                        setGroceryDate(d);
+                        setShowDatePicker(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* ── STANDARD: Amount ── */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-amount">
+                    Amount (BDT)
+                  </label>
+                  {splitType === 'fixed' && (
+                    <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
+                      Auto-calculated from split sums
+                    </span>
+                  )}
+                </div>
+                <input
+                  id="expense-amount" type="number" min="1" step="1"
+                  value={amount} onChange={e => setAmount(e.target.value)}
+                  placeholder="0.00" disabled={splitType === 'fixed'} required
+                  className="input text-xl font-bold"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#f1f5f9' }}
+                />
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1.5">
+                <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block" htmlFor="expense-desc">
+                  Description <span className="text-text-muted font-normal lowercase">(optional)</span>
+                </label>
+                <input
+                  id="expense-desc" type="text"
+                  value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="e.g. Monthly rent payment"
+                  className="input"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#f1f5f9' }}
+                />
+              </div>
+
+              {/* Date */}
+              <div className="space-y-2 mb-4">
+                <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block">
+                  Date
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowDatePicker(prev => !prev)}
+                  className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all active:scale-[0.99]"
+                  style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: showDatePicker ? '1px solid rgba(124,58,237,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                    color: '#f1f5f9',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Calendar size={15} style={{ color: '#7c3aed' }} />
+                    <span className="text-sm font-medium">
+                      {format(parseISO(groceryDate), 'd MMM yyyy')}
+                    </span>
+                    {groceryDate === todayStr && (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{
+                          background: 'rgba(16,185,129,0.15)',
+                          color: '#10b981',
+                          border: '1px solid rgba(16,185,129,0.3)',
+                        }}
+                      >
+                        Today
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    className={`transition-transform duration-200 ${showDatePicker ? 'rotate-180 text-[#a78bfa]' : 'text-slate-400'}`}
+                  />
+                </button>
+
+                {showDatePicker && (
+                  <div className="animate-fade-in pt-1">
+                    <GroceryDatePicker
+                      monthLabel={activeMonthLabel}
+                      selectedDate={groceryDate}
+                      onSelect={(d) => {
+                        setGroceryDate(d);
+                        setShowDatePicker(false);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Collapsible Advance Pay Options toggle */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancePayOptions(prev => !prev)}
+                  className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider transition-colors active:scale-95"
+                  style={{ color: '#7c3aed' }}
+                >
+                  {showAdvancePayOptions ? <ChevronUp className="w-4.5 h-4.5" /> : <ChevronDown className="w-4.5 h-4.5" />}
+                  Advance Pay Options
+                </button>
+              </div>
+
+              {showAdvancePayOptions && (
+                <div className="space-y-5 pt-3 animate-fade-in">
+                  {/* Paid By */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-text-secondary text-xs font-semibold uppercase tracking-wider block">Paid By</label>
@@ -715,7 +950,10 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
             )}
           </div>
           )}
-
+          </div>
+          )}
+          </>
+          )}
           <button
             id="expense-submit-btn"
             type="submit"

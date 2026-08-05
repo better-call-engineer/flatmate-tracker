@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { Month } from '@/lib/types';
 import { getAllMonths, getOrCreateCurrentMonth } from '@/lib/finance';
 import { format } from 'date-fns';
@@ -80,9 +81,20 @@ export function MonthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentMonthLabel, setSelectedMonthId]);
 
+  const { user } = useAuth();
+
   useEffect(() => {
-    fetchMonths();
-  }, [fetchMonths]);
+    if (user) {
+      // Only fetch months when authenticated
+      fetchMonths();
+    } else {
+      // Reset month state when signed out
+      setMonths([]);
+      setSelectedMonthIdState('');
+      setSelectedMonth(null);
+      setLoadingMonths(false);
+    }
+  }, [user, fetchMonths]);
 
   useEffect(() => {
     if (selectedMonthId && months.length > 0) {

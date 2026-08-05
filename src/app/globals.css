@@ -200,19 +200,51 @@
   ═══════════════════════════════════ */
   .meal-cell {
     @apply rounded-xl w-full aspect-square flex items-center justify-center
-           text-xs font-semibold cursor-pointer transition-all duration-150
+           text-sm sm:text-base font-bold cursor-pointer transition-all duration-150
            select-none relative;
   }
 
   .meal-cell-0 {
     background: rgba(255,255,255,0.04);
-    color: #334155;
+    color: #475569;
     border: 1px solid rgba(255,255,255,0.06);
   }
   .meal-cell-0:hover {
     background: rgba(124,58,237,0.1);
     border-color: rgba(124,58,237,0.3);
     color: #7c3aed;
+  }
+
+  /* Friday & Saturday distinction */
+  .meal-cell-friday {
+    background: rgba(124, 58, 237, 0.16);
+    color: #c4b5fd;
+    border: 1px solid rgba(124, 58, 237, 0.32);
+    box-shadow: 0 0 10px rgba(124, 58, 237, 0.12);
+  }
+  .meal-cell-friday:hover {
+    background: rgba(124, 58, 237, 0.26);
+    border-color: rgba(124, 58, 237, 0.5);
+    color: #a78bfa;
+  }
+
+  .meal-cell-saturday {
+    background: rgba(124, 58, 237, 0.06);
+    color: #94a3b8;
+    border: 1px solid rgba(124, 58, 237, 0.16);
+  }
+  .meal-cell-saturday:hover {
+    background: rgba(124, 58, 237, 0.14);
+    border-color: rgba(124, 58, 237, 0.3);
+    color: #cbd5e1;
+  }
+
+  .meal-cell-friday-active {
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.7), 0 0 12px rgba(124, 58, 237, 0.3);
+  }
+
+  .meal-cell-saturday-active {
+    box-shadow: 0 0 0 1.5px rgba(167, 139, 250, 0.35);
   }
 
   .meal-cell-half {

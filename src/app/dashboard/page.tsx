@@ -96,6 +96,7 @@ export default function DashboardPage() {
     const dayNum = i + 1;
     const dateStr = `${month ? month.label : currentMonthLabel}-${String(dayNum).padStart(2, '0')}`;
     const dateObj = parseISO(dateStr);
+    const dayOfWeek = dateObj.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
     return {
       date: dateStr,
       dayNumber: dayNum,
@@ -103,16 +104,28 @@ export default function DashboardPage() {
       guestCount: myGuestMeals[dateStr] ?? 0,
       isFuture: isAfter(dateObj, today),
       isWeekend: isWeekend(dateObj),
+      isFriday: dayOfWeek === 5,
+      isSaturday: dayOfWeek === 6,
     };
   });
 
-  const getMealCellClass = (count: number, isFuture: boolean, isLocked: boolean) => {
+  const getMealCellClass = (count: number, isFuture: boolean, isLocked: boolean, isFriday?: boolean, isSaturday?: boolean) => {
     if (isFuture || isLocked) return 'meal-cell meal-cell-future';
-    if (count === 0) return 'meal-cell meal-cell-0';
-    if (count === 0.5) return 'meal-cell meal-cell-half';
-    if (count === 1) return 'meal-cell meal-cell-1';
-    if (count === 1.5) return 'meal-cell meal-cell-15';
-    return 'meal-cell meal-cell-2';
+    if (count === 0) {
+      if (isFriday) return 'meal-cell meal-cell-friday';
+      if (isSaturday) return 'meal-cell meal-cell-saturday';
+      return 'meal-cell meal-cell-0';
+    }
+    let baseClass = 'meal-cell ';
+    if (count === 0.5) baseClass += 'meal-cell-half';
+    else if (count === 1) baseClass += 'meal-cell-1';
+    else if (count === 1.5) baseClass += 'meal-cell-15';
+    else baseClass += 'meal-cell-2';
+
+    if (isFriday) baseClass += ' meal-cell-friday-active';
+    else if (isSaturday) baseClass += ' meal-cell-saturday-active';
+
+    return baseClass;
   };
 
   const getMealCellGuestStyle = (count: number, guestCount: number, isFuture: boolean, isLocked: boolean): React.CSSProperties | undefined => {
@@ -132,6 +145,7 @@ export default function DashboardPage() {
   // ── Derived stats ─────────────────────────────────────────────────────────
   const totalMyMeals = Object.values(myMeals).reduce((s, v) => s + v, 0);
   const totalMyGuestMeals = Object.values(myGuestMeals).reduce((s, v) => s + v, 0);
+  const noMealDaysCount = calendarDays.filter(d => !d.isFuture && d.count === 0 && d.guestCount === 0).length;
   const totalGrocery = expenses.filter(e => e.category === 'grocery').reduce((s, e) => s + e.amount, 0);
   const totalAllMeals = meals.reduce((s, m) => s + m.count + ((m as any).guest_count || 0), 0);
   const perMealRate = totalAllMeals > 0 ? totalGrocery / totalAllMeals : 0;
@@ -199,7 +213,18 @@ export default function DashboardPage() {
   const totalPaidVal = myBalance?.totalPaid ?? 0;
   const dueVal = monthlyExpenseVal - totalPaidVal;
   const isOverpaid = dueVal < 0;
-  const calendarProps = { month, currentMonthLabel, calendarDays, getMealCellClass, getMealCellGuestStyle, isLocked, setSelectedDay };
+  const calendarProps = {
+    month,
+    currentMonthLabel,
+    calendarDays,
+    getMealCellClass,
+    getMealCellGuestStyle,
+    isLocked,
+    setSelectedDay,
+    noMealDaysCount,
+    totalMyMeals,
+    totalMyGuestMeals,
+  };
 
   return (
     <div className="h-full flex flex-col overflow-y-auto overflow-x-hidden animate-fade-in">
@@ -397,8 +422,8 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Meal Stats — flex-1 so its bottom edge aligns with Meal Calendar */}
-          <div className="bento-card p-4 flex-1 flex flex-col justify-between">
+          {/* Meal Stats */}
+          <div className="bento-card p-4 flex flex-col justify-between min-h-[120px]">
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center icon-container-emerald">
@@ -418,11 +443,7 @@ export default function DashboardPage() {
                 return (
                   <div className="col-span-1 text-center p-3 rounded-xl flex flex-col items-center justify-center h-full"
                     style={{ background: bgGradient, border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div className="flex justify-center items-baseline gap-0.5">
-                      <span className="text-xl font-extrabold text-[#a78bfa]">{totalMyMeals}</span>
-                      <span className="text-xs text-slate-500 font-semibold">+</span>
-                      <span className="text-sm font-bold text-[#f59e0b]">{totalMyGuestMeals}g</span>
-                    </div>
+                    <p className="text-xl font-extrabold leading-tight text-[#a78bfa]">{combined}</p>
                     <p className="text-[10px] font-medium text-slate-400 mt-1">My Meals</p>
                   </div>
                 );
@@ -430,19 +451,19 @@ export default function DashboardPage() {
               <div className="text-center p-3 rounded-xl flex flex-col items-center justify-center h-full"
                 style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <p className="text-xl font-extrabold leading-tight text-[#f1f5f9]">{totalAllMeals}</p>
-                <p className="text-[10px] font-medium text-slate-400 mt-1">Total</p>
+                <p className="text-[10px] font-medium text-slate-400 mt-1">Grand Total</p>
+              </div>
+              <div className="text-center p-3 rounded-xl flex flex-col items-center justify-center h-full"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <p className="text-lg font-extrabold leading-tight text-[#10b981]">{formatBDT(perMealRate)}</p>
+                <p className="text-[10px] font-medium text-slate-400 mt-1">Per Meal</p>
               </div>
               <div className="text-center p-3 rounded-xl flex flex-col items-center justify-center h-full"
                 style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <p className="text-lg font-extrabold leading-tight text-[#22d3ee]">
                   {formatBDT((totalMyMeals + totalMyGuestMeals) * perMealRate)}
                 </p>
-                <p className="text-[10px] font-medium text-slate-400 mt-1">Meal Cost</p>
-              </div>
-              <div className="text-center p-3 rounded-xl flex flex-col items-center justify-center h-full"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <p className="text-lg font-extrabold leading-tight text-[#10b981]">{formatBDT(perMealRate)}</p>
-                <p className="text-[10px] font-medium text-slate-400 mt-1">Per Meal</p>
+                <p className="text-[10px] font-medium text-slate-400 mt-1">My Meal Cost</p>
               </div>
             </div>
           </div>
@@ -494,75 +515,142 @@ export default function DashboardPage() {
   );
 }
 
+// ── 5-Row Calendar Grid Builder ───────────────────────────────────────────────
+function build5RowCalendarGrid(
+  monthLabel: string,
+  calendarDays: any[]
+) {
+  const firstDayOffset = monthLabel ? new Date(`${monthLabel}-01`).getDay() : 0;
+  const grid: Array<{ key: string; isEmpty: boolean; day?: any }> = Array.from({ length: 35 }, (_, i) => ({
+    key: `empty-${i}`,
+    isEmpty: true,
+  }));
+
+  calendarDays.forEach((day) => {
+    const linearPos = firstDayOffset + (day.dayNumber - 1);
+    let targetIndex = linearPos;
+    if (linearPos >= 35) {
+      targetIndex = linearPos - 35;
+    }
+    grid[targetIndex] = {
+      key: day.date,
+      isEmpty: false,
+      day,
+    };
+  });
+
+  return grid;
+}
+
 // ── Meal Calendar ─────────────────────────────────────────────────────────────
 function MealCalendar({
   month, currentMonthLabel, calendarDays, getMealCellClass, getMealCellGuestStyle, isLocked, setSelectedDay,
+  noMealDaysCount, totalMyMeals, totalMyGuestMeals,
 }: {
   month: any;
   currentMonthLabel: string;
   calendarDays: any[];
-  getMealCellClass: (count: number, isFuture: boolean, isLocked: boolean) => string;
+  getMealCellClass: (count: number, isFuture: boolean, isLocked: boolean, isFriday?: boolean, isSaturday?: boolean) => string;
   getMealCellGuestStyle: (count: number, guestCount: number, isFuture: boolean, isLocked: boolean) => React.CSSProperties | undefined;
   isLocked: boolean;
   setSelectedDay: (day: string) => void;
+  noMealDaysCount: number;
+  totalMyMeals: number;
+  totalMyGuestMeals: number;
 }) {
-  const firstDayOffset = month ? new Date(`${month.label}-01`).getDay() : 0;
-  const totalCells = firstDayOffset + calendarDays.length;
-  const rowCount = Math.ceil(totalCells / 7) || 5;
+  const monthLabel = month ? month.label : currentMonthLabel;
+  const gridCells = build5RowCalendarGrid(monthLabel, calendarDays);
+
+  const DAY_HEADER_LABELS = [
+    { name: 'S', isFri: false, isSat: false },
+    { name: 'M', isFri: false, isSat: false },
+    { name: 'T', isFri: false, isSat: false },
+    { name: 'W', isFri: false, isSat: false },
+    { name: 'T', isFri: false, isSat: false },
+    { name: 'F', isFri: true,  isSat: false },
+    { name: 'S', isFri: false, isSat: true  },
+  ];
 
   return (
-    <div className="bento-card p-4 h-full flex flex-col justify-between">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bento-card p-4 sm:p-5 h-full flex flex-col justify-between">
+      {/* Header & Tagged Legend */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
         <div>
-          <h2 className="font-semibold text-sm" style={{ color: '#f1f5f9' }}>Meal Calendar</h2>
-          <p className="text-[10px] mt-0.5" style={{ color: '#475569' }}>Tap a day to log meals</p>
+          <h2 className="font-bold text-base" style={{ color: '#f1f5f9' }}>Meal Calendar</h2>
+          <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>Tap a day to log meals</p>
         </div>
-        <div className="flex items-center gap-2 text-[10px]" style={{ color: '#475569' }}>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }} />0
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: 'rgba(16,185,129,0.25)' }} />1
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#10b981' }} />2
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.3) 50%, rgba(245,158,11,0.5) 50%)', border: '1px solid rgba(245,158,11,0.4)' }} />+G
-          </span>
+
+        {/* Tagged Legend */}
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+          {/* No Meals */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)' }} />
+            <span style={{ color: '#94a3b8' }}>No Meals:</span>
+            <span className="font-extrabold text-slate-200">{noMealDaysCount}</span>
+          </div>
+
+          {/* Regular */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.28)' }}>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#10b981' }} />
+            <span style={{ color: '#6ee7b7' }}>Regular:</span>
+            <span className="font-extrabold text-emerald-300">{totalMyMeals}</span>
+          </div>
+
+          {/* Guest Meals */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.28)' }}>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#f59e0b' }} />
+            <span style={{ color: '#fcd34d' }}>Guest Meals:</span>
+            <span className="font-extrabold text-amber-300">{totalMyGuestMeals}</span>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col justify-center my-auto">
-        {/* Day labels */}
-        <div className="grid grid-cols-7 gap-1.5 mb-1.5">
-          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-            <div key={i} className="text-center text-[9px] font-semibold uppercase" style={{ color: '#334155' }}>{d}</div>
+      <div className="flex-1 flex flex-col justify-between my-auto">
+        {/* Day labels header */}
+        <div className="grid grid-cols-7 gap-1.5 mb-2">
+          {DAY_HEADER_LABELS.map((d, i) => (
+            <div
+              key={i}
+              className="text-center text-xs font-extrabold uppercase py-1 rounded-md transition-colors"
+              style={{
+                color: d.isFri ? '#c4b5fd' : d.isSat ? '#94a3b8' : '#64748b',
+                background: d.isFri ? 'rgba(124, 58, 237, 0.18)' : d.isSat ? 'rgba(124, 58, 237, 0.07)' : 'transparent',
+              }}
+            >
+              {d.name}
+            </div>
           ))}
         </div>
 
-        {/* Calendar cells */}
+        {/* Calendar cells (35 square tiles in 5 rows) */}
         <div className="grid grid-cols-7 gap-1.5">
-          {Array.from({ length: month ? new Date(`${month.label}-01`).getDay() : 0 }).map((_, i) => (
-            <div key={`offset-${i}`} />
-          ))}
-          {calendarDays.map(day => {
+          {gridCells.map((cell, idx) => {
+            if (cell.isEmpty) {
+              return <div key={`empty-${idx}`} className="w-full aspect-square" />;
+            }
+            const day = cell.day;
             const guestStyle = getMealCellGuestStyle(day.count, day.guestCount, day.isFuture, isLocked);
+            const cellClass = getMealCellClass(day.count, day.isFuture, isLocked, day.isFriday, day.isSaturday);
             return (
               <button
                 key={day.date}
                 id={`meal-cell-${day.date}`}
                 onClick={() => !day.isFuture && !isLocked && setSelectedDay(day.date)}
-                className={getMealCellClass(day.count, day.isFuture, isLocked)}
+                className={cellClass}
                 style={guestStyle}
                 title={day.guestCount > 0
                   ? `${day.date}: ${day.count} meal(s) + ${day.guestCount} guest`
                   : `${day.date}: ${day.count} meal(s)`}
                 disabled={day.isFuture || isLocked}
               >
-                <span className="leading-none">{day.count > 0 || day.guestCount > 0 ? day.count : day.dayNumber}</span>
+                <span className="leading-none text-sm sm:text-base font-extrabold">
+                  {day.count > 0 || day.guestCount > 0 ? day.count : day.dayNumber}
+                </span>
                 {day.guestCount > 0 && (
-                  <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold leading-none" style={{ color: '#fbbf24' }}>
+                  <span
+                    className="absolute bottom-0.5 right-0.5 text-[8px] sm:text-[9px] font-extrabold leading-none px-1 py-0.2 rounded"
+                    style={{ color: '#fbbf24', background: 'rgba(0,0,0,0.65)' }}
+                  >
                     +{day.guestCount}g
                   </span>
                 )}

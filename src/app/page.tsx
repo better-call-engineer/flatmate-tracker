@@ -20,16 +20,16 @@ type Slots = [SlotData, SlotData, SlotData, SlotData];
 export default function LandingPage() {
   const [slots, setSlots] = useState<Slots>([null, null, null, null]);
   const [loading, setLoading] = useState(true);
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (user && profile) {
+    if (!authLoading && user && profile) {
       if (profile.status === 'active') {
         router.replace(profile.role === 'admin' ? '/admin' : '/dashboard');
       }
     }
-  }, [user, profile, router]);
+  }, [user, profile, authLoading, router]);
 
   useEffect(() => {
     fetchSlots();
@@ -63,6 +63,19 @@ export default function LandingPage() {
       router.push(`/auth/login?slot=${slotNumber}`);
     }
   };
+
+  // While auth is initializing, show a minimal dark screen to avoid
+  // flickering the landing page for users who are already signed in.
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#080c14' }}>
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center animate-pulse"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 24px rgba(124,58,237,0.5)' }}>
+          <IconHome size={20} className="text-white" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen grid-bg flex flex-col items-center justify-center px-4 py-10 relative overflow-hidden">

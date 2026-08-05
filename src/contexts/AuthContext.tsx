@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { Profile } from '@/lib/types';
@@ -44,19 +44,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user) await fetchProfile(user.id);
   };
 
-  useEffect(() => {
-    // ── Immediately resolve session on mount (fixes blank-screen-on-load) ──
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      }
-      setLoading(false);
-    });
+  // Tracks whether the initial getSession() call has completed.
+  // Prevents onAuthStateChange from causing a spurious loading flash
+  // on the first render (Supabase fires SIGNED_IN immediately if a
+  // session already exists, racing with getSession).
+  const initializedRef = useRef(false);
 
-    // ── Also subscribe to future auth changes ──
+  useEffect(() => {
+    // ── Subscribe FIRST so we never miss an event ──
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        // Ignore the synthetic event that fires right on subscription
+        // while getSession() is still resolving the initial state.
+        if (!initializedRef.current) return;
+
         try {
           setUser(session?.user ?? null);
           if (session?.user) {
@@ -67,11 +68,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
           console.error('Error in auth state change:', err);
         } finally {
-          // Only set loading false here for subsequent changes (initial is above)
           setLoading(false);
         }
       }
     );
+
+    // ── Resolve the initial session synchronously ──
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        await fetchProfile(session.user.id);
+      }
+      // Mark as initialized BEFORE setting loading=false so any
+      // concurrent onAuthStateChange events are handled correctly.
+      initializedRef.current = true;
+      setLoading(false);
+    });
+
     return () => subscription.unsubscribe();
   }, []);
 

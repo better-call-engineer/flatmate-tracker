@@ -30,7 +30,7 @@ const navItems = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
-  const { selectedMonthId, months } = useSelectedMonth();
+  const { selectedMonthId, months, loadingMonths } = useSelectedMonth();
   const router = useRouter();
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -49,7 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setDrawerOpen(false);
   }, [pathname]);
 
-  if (loading) {
+  if (loading || loadingMonths) {
     return (
       <div className="h-screen flex items-center justify-center" style={{ background: '#080c14' }}>
         <div className="flex flex-col items-center gap-3">
