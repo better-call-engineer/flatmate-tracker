@@ -54,9 +54,9 @@ export function parseCarryForward(val: any): CarryForwardBalance {
   return { mealBalance: 0, expenseBalance: 0, total: 0 };
 }
 
-// Automatically computes / syncs opening balances for any month from its preceding closed month.
+// Automatically computes / syncs opening balances for any month from its preceding month.
 // June (2026-06) is the start month with 0 opening balance.
-// For July, August, September... it carries forward the preceding month's itemized meal & expense balances.
+// For July, August, September... it carries forward the preceding month's itemized meal & monthly expense balances.
 export async function getOpeningBalancesForMonth(
   month: Month,
   allMonths: Month[]
@@ -77,91 +77,95 @@ export async function getOpeningBalancesForMonth(
     return parsed;
   }
 
-  if (prevMonth.is_closed) {
-    try {
-      const [profilesRes, expRes, mealRes, fixedRes, sharedRes, advanceRes] = await Promise.all([
-        (supabase as any).from('profiles').select('*').eq('status', 'active'),
-        (supabase as any).from('expenses').select('*').eq('month_id', prevMonth.id),
-        (supabase as any).from('meals').select('*').eq('month_id', prevMonth.id),
-        (supabase as any).from('fixed_overhead_configs').select('*').eq('month_id', prevMonth.id),
-        (supabase as any).from('shared_expense_configs').select('*').eq('month_id', prevMonth.id),
-        (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', prevMonth.label),
-      ]);
+  try {
+    // Recursively resolve previous month's opening balances so the entire chain is fresh and accurate
+    const prevOpening = await getOpeningBalancesForMonth(prevMonth, allMonths);
 
-      const profs = (profilesRes.data ?? []) as Profile[];
-      const exps = (expRes.data ?? []) as Expense[];
-      const mls = (mealRes.data ?? []) as Meal[];
-      const fxd = (fixedRes.data ?? []) as import('./types').FixedOverheadConfig[];
-      const shd = (sharedRes.data ?? []) as import('./types').SharedExpenseConfig[];
+    const [profilesRes, expRes, mealRes, fixedRes, sharedRes, advanceRes] = await Promise.all([
+      (supabase as any).from('profiles').select('*').eq('status', 'active'),
+      (supabase as any).from('expenses').select('*').eq('month_id', prevMonth.id),
+      (supabase as any).from('meals').select('*').eq('month_id', prevMonth.id),
+      (supabase as any).from('fixed_overhead_configs').select('*').eq('month_id', prevMonth.id),
+      (supabase as any).from('shared_expense_configs').select('*').eq('month_id', prevMonth.id),
+      (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', prevMonth.label),
+    ]);
 
-      const advCredits: Record<string, number> = {};
-      (advanceRes.data ?? []).forEach((e: Expense) => {
-        const pd = e.paid_by_details as Record<string, number> | null;
-        if (pd && Object.keys(pd).length > 0) {
-          Object.entries(pd).forEach(([uid, amt]) => { advCredits[uid] = (advCredits[uid] ?? 0) + amt; });
-        } else {
-          advCredits[e.paid_by] = (advCredits[e.paid_by] ?? 0) + e.amount;
-        }
-      });
+    const profs = (profilesRes.data ?? []) as Profile[];
+    const exps = (expRes.data ?? []) as Expense[];
+    const mls = (mealRes.data ?? []) as Meal[];
+    const fxd = (fixedRes.data ?? []) as import('./types').FixedOverheadConfig[];
+    const shd = (sharedRes.data ?? []) as import('./types').SharedExpenseConfig[];
 
-      const prevOpening = (prevMonth.opening_balances as Record<string, any>) ?? {};
-      const prevBalances = calculateBalances(exps, mls, profs, prevOpening, fxd, shd, advCredits);
-
-      const computedCarryForward: Record<string, CarryForwardBalance> = {};
-      prevBalances.forEach(b => {
-        // 1. Meal balance: what the user paid toward grocery vs what their meals actually cost.
-        //    Positive = overpaid grocery (credit), Negative = meal debt (due next month).
-        const userGrocerySpent = exps
-          .filter(e => e.category === 'grocery')
-          .reduce((sum, e) => {
-            const paidDetails = e.paid_by_details as Record<string, number> | null;
-            if (paidDetails && Object.keys(paidDetails).length > 0) {
-              return sum + (paidDetails[b.userId] ?? 0);
-            }
-            return sum + (e.paid_by === b.userId ? e.amount : 0);
-          }, 0);
-        const mealBalance = Math.round((userGrocerySpent - b.mealCost) * 100) / 100;
-
-        // 2. Overhead/expense balance: derive from the total balance (which already accounts for
-        //    ALL payments and shares correctly via calculateBalances) minus the meal component.
-        //    total carry = b.balance - b.mealCost  (mealCost deferred, grocery already in b.balance)
-        //    expenseBalance = totalCarry - mealBalance = (b.balance - b.mealCost) - (grocerySpent - mealCost)
-        //                   = b.balance - grocerySpent
-        //    If the user settled overheads exactly: b.balance == grocerySpent → expenseBalance == 0 ✓
-        const totalCarry = Math.round((b.balance - b.mealCost) * 100) / 100;
-        const expenseBalance = Math.round((totalCarry - mealBalance) * 100) / 100;
-        const total = Math.round(totalCarry * 100) / 100;
-
-        computedCarryForward[b.userId] = {
-          mealBalance,
-          expenseBalance,
-          total,
-        };
-      });
-
-      // Update in DB if different to keep it cached
-      const currentOpening = (month.opening_balances as Record<string, any>) ?? {};
-      const isDiff = JSON.stringify(currentOpening) !== JSON.stringify(computedCarryForward);
-      if (isDiff) {
-        await (supabase as any)
-          .from('months')
-          .update({ opening_balances: computedCarryForward })
-          .eq('id', month.id);
+    const advCredits: Record<string, number> = {};
+    (advanceRes.data ?? []).forEach((e: Expense) => {
+      const pd = e.paid_by_details as Record<string, number> | null;
+      if (pd && Object.keys(pd).length > 0) {
+        Object.entries(pd).forEach(([uid, amt]) => { advCredits[uid] = (advCredits[uid] ?? 0) + amt; });
+      } else {
+        advCredits[e.paid_by] = (advCredits[e.paid_by] ?? 0) + e.amount;
       }
+    });
 
-      return computedCarryForward;
-    } catch {
-      const stored = (month.opening_balances as Record<string, any>) ?? {};
-      const parsed: Record<string, CarryForwardBalance> = {};
-      Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
-      return parsed;
+    const prevBalances = calculateBalances(exps, mls, profs, prevOpening, fxd, shd, advCredits);
+
+    const computedCarryForward: Record<string, CarryForwardBalance> = {};
+    prevBalances.forEach(b => {
+      // 1. Meal balance: what the user paid toward grocery vs what their meals actually cost.
+      //    Positive = overpaid grocery (credit to next month's Total Paid), Negative = meal debt (due next month).
+      const userGrocerySpent = exps
+        .filter(e => e.category === 'grocery')
+        .reduce((sum, e) => {
+          const paidDetails = e.paid_by_details as Record<string, number> | null;
+          if (paidDetails && Object.keys(paidDetails).length > 0) {
+            return sum + (paidDetails[b.userId] ?? 0);
+          }
+          return sum + (e.paid_by === b.userId ? e.amount : 0);
+        }, 0);
+      const mealBalance = Math.round((userGrocerySpent - b.mealCost) * 100) / 100;
+
+      // 2. Monthly expense balance: Total Paid vs Monthly Expense in the previous month.
+      //    Mirrors the dashboard numbers:
+      //    Monthly Expense = Fixed + Shared + prev meal due + prev expense due
+      //    Total Paid = non-grocery paid + advance + prev meal overpaid + prev expense overpaid
+      //    expenseBalance = Total Paid - Monthly Expense
+      //    Positive = overpaid (credit to next month's Total Paid), Negative = due (added to next month's Monthly Expense)
+      const pCarry = parseCarryForward(prevOpening[b.userId]);
+      const pMealDue = pCarry.mealBalance < 0 ? Math.abs(pCarry.mealBalance) : 0;
+      const pMealOverpaid = pCarry.mealBalance > 0 ? pCarry.mealBalance : 0;
+      const pExpDue = pCarry.expenseBalance < 0 ? Math.abs(pCarry.expenseBalance) : 0;
+      const pExpOverpaid = pCarry.expenseBalance > 0 ? pCarry.expenseBalance : 0;
+
+      const prevMonthlyExp = b.fixedOverheadShare + b.sharedExpenseShare + pMealDue + pExpDue;
+      const prevTotalPaidTile = (b.totalPaid - userGrocerySpent) + b.advanceCredit + pMealOverpaid + pExpOverpaid;
+      const expenseBalance = Math.round((prevTotalPaidTile - prevMonthlyExp) * 100) / 100;
+
+      const total = Math.round((mealBalance + expenseBalance) * 100) / 100;
+
+      computedCarryForward[b.userId] = {
+        mealBalance,
+        expenseBalance,
+        total,
+      };
+    });
+
+    // Update in DB if different to keep it cached
+    const currentOpening = (month.opening_balances as Record<string, any>) ?? {};
+    const isDiff = JSON.stringify(currentOpening) !== JSON.stringify(computedCarryForward);
+    if (isDiff) {
+      await (supabase as any)
+        .from('months')
+        .update({ opening_balances: computedCarryForward })
+        .eq('id', month.id);
     }
-  }
 
-  const stored = (month.opening_balances as Record<string, any>) ?? {};
-  const parsed: Record<string, CarryForwardBalance> = {};
-  Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
-  return parsed;
+    return computedCarryForward;
+  } catch (err) {
+    console.error('Error computing opening balances:', err);
+    const stored = (month.opening_balances as Record<string, any>) ?? {};
+    const parsed: Record<string, CarryForwardBalance> = {};
+    Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
+    return parsed;
+  }
 }
 
 // ---- Balance calculation ----

@@ -233,22 +233,22 @@ export default function DashboardPage() {
   // Carry-forward balances from preceding closed month (meal balance + expense balance).
   const carry = myBalance?.carryForward ?? { mealBalance: 0, expenseBalance: 0, total: 0 };
 
-  // 1. Dedicated Previous Month Meal Adjustment
+  // 1. Previous Month Meal Adjustment
   const prevMealDue = carry.mealBalance < 0 ? Math.abs(carry.mealBalance) : 0;
   const prevMealOverpaid = carry.mealBalance > 0 ? carry.mealBalance : 0;
 
-  // 2. Previous Month Monthly Expense Adjustment
+  // 2. Previous Month Monthly Due Adjustment
   const prevExpenseDue = carry.expenseBalance < 0 ? Math.abs(carry.expenseBalance) : 0;
   const prevExpenseOverpaid = carry.expenseBalance > 0 ? carry.expenseBalance : 0;
 
-  // Monthly Expense = Fixed + Shared + Previous Month Meal Due + Previous Month Expense Due
+  // Monthly Expense = Fixed + Shared + Prev Meal Due + Prev Monthly Due
   const baseExpenses = myBalance ? myBalance.fixedOverheadShare + myBalance.sharedExpenseShare : 0;
   const monthlyExpenseVal = baseExpenses + prevMealDue + prevExpenseDue;
 
-  // Total Paid = current month non-grocery paid + advance payments for this month + previous month's overpaid credits
+  // Total Paid = non-grocery paid + advance + prev meal overpaid + prev monthly overpaid
   const advanceCredit = myBalance?.advanceCredit ?? 0;
   const currentMonthPaid = myBalance ? (myBalance.totalPaid - totalMyGrocerySpent) : 0;
-  const totalPaidVal = currentMonthPaid + advanceCredit + prevExpenseOverpaid + prevMealOverpaid;
+  const totalPaidVal = currentMonthPaid + advanceCredit + prevMealOverpaid + prevExpenseOverpaid;
 
   // Due = Monthly Expense - Total Paid
   const dueVal = monthlyExpenseVal - totalPaidVal;
@@ -443,7 +443,7 @@ export default function DashboardPage() {
                 value={monthlyExpenseVal}
                 icon={<IconWallet size={15} />}
                 isPrimary
-                suffix={prevMealDue > 0 || prevExpenseDue > 0 ? 'Fixed + Shared + Prev. Due' : 'Fixed + Shared'}
+                suffix={(prevMealDue > 0 || prevExpenseDue > 0) ? 'Fixed + Shared + Prev. Due' : 'Fixed + Shared'}
                 clickable
               />
             </button>
@@ -868,40 +868,24 @@ function MonthlyBreakdownModal({
             </>
           )}
 
-          {/* Previous Month Meal Adjustment (Dedicated Segment!) */}
+          {/* Previous Month Carry-Forward */}
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>
-            Prev. Month Meal Adjustment
+            Prev. Month Carry-Forward
           </p>
-          {carryForward.mealBalance < 0 ? (
-            <Row label="Prev. Month Meal Due" amount={Math.abs(carryForward.mealBalance)} accent="#fda4af" prefix="+" />
-          ) : carryForward.mealBalance > 0 ? (
-            <Row label="Prev. Month Meal Overpaid" amount={carryForward.mealBalance} accent="#6ee7b7" prefix="-" />
-          ) : (
-            <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-              <span className="text-xs font-medium" style={{ color: '#94a3b8' }}>Adjustment</span>
-              <span className="text-sm font-bold" style={{ color: '#94a3b8' }}>৳0</span>
-            </div>
-          )}
+          <Row 
+            label={carryForward.mealBalance > 0 ? "Prev. Month Meal Overdue" : "Prev. Month Meal Due"} 
+            amount={Math.abs(carryForward.mealBalance)} 
+            accent={carryForward.mealBalance < 0 ? "#fda4af" : carryForward.mealBalance > 0 ? "#6ee7b7" : "#94a3b8"} 
+            prefix={carryForward.mealBalance < 0 ? "+" : carryForward.mealBalance > 0 ? "-" : ""} 
+          />
+          <Row 
+            label={carryForward.expenseBalance > 0 ? "Prev. Monthly Overdue" : "Prev. Monthly Due"} 
+            amount={Math.abs(carryForward.expenseBalance)} 
+            accent={carryForward.expenseBalance < 0 ? "#fda4af" : carryForward.expenseBalance > 0 ? "#6ee7b7" : "#94a3b8"} 
+            prefix={carryForward.expenseBalance < 0 ? "+" : carryForward.expenseBalance > 0 ? "-" : ""} 
+          />
 
-          {/* Previous Month Monthly Expense Overdue / Overpaid */}
-          {carryForward.expenseBalance < 0 && (
-            <>
-              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>
-                Prev. Month Expense Due
-              </p>
-              <Row label="Unpaid Monthly Expense Due" amount={Math.abs(carryForward.expenseBalance)} accent="#fda4af" prefix="+" />
-            </>
-          )}
 
-          {carryForward.expenseBalance > 0 && (
-            <div className="flex items-start gap-2 mt-3 px-3 py-2.5 rounded-xl"
-              style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
-              <span style={{ color: '#34d399', fontSize: 13 }}>✓</span>
-              <p className="text-[10px] leading-relaxed" style={{ color: '#a7f3d0' }}>
-                Prev. month expense overpayment ({formatBDT(carryForward.expenseBalance)}) is credited to your <strong>Total Paid</strong> tile.
-              </p>
-            </div>
-          )}
 
           {/* Grocery deferred note */}
           <div className="flex items-start gap-2 mt-3 px-3 py-2.5 rounded-xl"
@@ -1023,16 +1007,16 @@ function TotalPaidBreakdownModal({
           )}
 
           {/* Previous month overpaid credits */}
-          {(carryForward.expenseBalance > 0 || carryForward.mealBalance > 0) && (
+          {(carryForward.mealBalance > 0 || carryForward.expenseBalance > 0) && (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
                 Previous Month Overpayments
               </p>
-              {carryForward.expenseBalance > 0 && (
-                <Row label="Prev. Month Expense Overpaid" amount={carryForward.expenseBalance} accent="#34d399" sub="Credited from previous month" />
-              )}
               {carryForward.mealBalance > 0 && (
                 <Row label="Prev. Month Meal Overpaid" amount={carryForward.mealBalance} accent="#34d399" sub="Credited from previous month" />
+              )}
+              {carryForward.expenseBalance > 0 && (
+                <Row label="Prev. Month Monthly Overpaid" amount={carryForward.expenseBalance} accent="#34d399" sub="Credited from previous month" />
               )}
             </div>
           )}
