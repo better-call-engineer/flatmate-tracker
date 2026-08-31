@@ -76,6 +76,8 @@ export interface Database {
           split_type: 'even' | 'custom'
           split_details: Json
           paid_by_details: Json
+          is_advance: boolean
+          advance_for_month: string | null
           created_at: string
         }
         Insert: {
@@ -89,6 +91,8 @@ export interface Database {
           split_type?: 'even' | 'custom'
           split_details?: Json
           paid_by_details?: Json
+          is_advance?: boolean
+          advance_for_month?: string | null
           created_at?: string
         }
         Update: {
@@ -102,6 +106,8 @@ export interface Database {
           split_type?: 'even' | 'custom'
           split_details?: Json
           paid_by_details?: Json
+          is_advance?: boolean
+          advance_for_month?: string | null
           created_at?: string
         }
       }

@@ -34,14 +34,147 @@ export async function getAllMonths(): Promise<Month[]> {
   return data as Month[];
 }
 
+import { CarryForwardBalance } from './types';
+
+export function parseCarryForward(val: any): CarryForwardBalance {
+  if (!val) return { mealBalance: 0, expenseBalance: 0, total: 0 };
+  if (typeof val === 'number') {
+    return {
+      mealBalance: val < 0 ? val : 0,
+      expenseBalance: val > 0 ? val : 0,
+      total: val,
+    };
+  }
+  if (typeof val === 'object') {
+    const meal = Number(val.mealBalance ?? 0);
+    const exp = Number(val.expenseBalance ?? 0);
+    const tot = Number(val.total ?? (meal + exp));
+    return { mealBalance: meal, expenseBalance: exp, total: tot };
+  }
+  return { mealBalance: 0, expenseBalance: 0, total: 0 };
+}
+
+// Automatically computes / syncs opening balances for any month from its preceding closed month.
+// June (2026-06) is the start month with 0 opening balance.
+// For July, August, September... it carries forward the preceding month's itemized meal & expense balances.
+export async function getOpeningBalancesForMonth(
+  month: Month,
+  allMonths: Month[]
+): Promise<Record<string, CarryForwardBalance>> {
+  if (month.label === '2026-06') {
+    return {};
+  }
+
+  const [year, mNum] = month.label.split('-').map(Number);
+  const prevDate = new Date(year, mNum - 2, 1);
+  const prevLabel = format(prevDate, 'yyyy-MM');
+
+  const prevMonth = allMonths.find(m => m.label === prevLabel);
+  if (!prevMonth) {
+    const stored = (month.opening_balances as Record<string, any>) ?? {};
+    const parsed: Record<string, CarryForwardBalance> = {};
+    Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
+    return parsed;
+  }
+
+  if (prevMonth.is_closed) {
+    try {
+      const [profilesRes, expRes, mealRes, fixedRes, sharedRes, advanceRes] = await Promise.all([
+        (supabase as any).from('profiles').select('*').eq('status', 'active'),
+        (supabase as any).from('expenses').select('*').eq('month_id', prevMonth.id),
+        (supabase as any).from('meals').select('*').eq('month_id', prevMonth.id),
+        (supabase as any).from('fixed_overhead_configs').select('*').eq('month_id', prevMonth.id),
+        (supabase as any).from('shared_expense_configs').select('*').eq('month_id', prevMonth.id),
+        (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', prevMonth.label),
+      ]);
+
+      const profs = (profilesRes.data ?? []) as Profile[];
+      const exps = (expRes.data ?? []) as Expense[];
+      const mls = (mealRes.data ?? []) as Meal[];
+      const fxd = (fixedRes.data ?? []) as import('./types').FixedOverheadConfig[];
+      const shd = (sharedRes.data ?? []) as import('./types').SharedExpenseConfig[];
+
+      const advCredits: Record<string, number> = {};
+      (advanceRes.data ?? []).forEach((e: Expense) => {
+        const pd = e.paid_by_details as Record<string, number> | null;
+        if (pd && Object.keys(pd).length > 0) {
+          Object.entries(pd).forEach(([uid, amt]) => { advCredits[uid] = (advCredits[uid] ?? 0) + amt; });
+        } else {
+          advCredits[e.paid_by] = (advCredits[e.paid_by] ?? 0) + e.amount;
+        }
+      });
+
+      const prevOpening = (prevMonth.opening_balances as Record<string, any>) ?? {};
+      const prevBalances = calculateBalances(exps, mls, profs, prevOpening, fxd, shd, advCredits);
+
+      const computedCarryForward: Record<string, CarryForwardBalance> = {};
+      prevBalances.forEach(b => {
+        // 1. Meal balance: what the user paid toward grocery vs what their meals actually cost.
+        //    Positive = overpaid grocery (credit), Negative = meal debt (due next month).
+        const userGrocerySpent = exps
+          .filter(e => e.category === 'grocery')
+          .reduce((sum, e) => {
+            const paidDetails = e.paid_by_details as Record<string, number> | null;
+            if (paidDetails && Object.keys(paidDetails).length > 0) {
+              return sum + (paidDetails[b.userId] ?? 0);
+            }
+            return sum + (e.paid_by === b.userId ? e.amount : 0);
+          }, 0);
+        const mealBalance = Math.round((userGrocerySpent - b.mealCost) * 100) / 100;
+
+        // 2. Overhead/expense balance: derive from the total balance (which already accounts for
+        //    ALL payments and shares correctly via calculateBalances) minus the meal component.
+        //    total carry = b.balance - b.mealCost  (mealCost deferred, grocery already in b.balance)
+        //    expenseBalance = totalCarry - mealBalance = (b.balance - b.mealCost) - (grocerySpent - mealCost)
+        //                   = b.balance - grocerySpent
+        //    If the user settled overheads exactly: b.balance == grocerySpent → expenseBalance == 0 ✓
+        const totalCarry = Math.round((b.balance - b.mealCost) * 100) / 100;
+        const expenseBalance = Math.round((totalCarry - mealBalance) * 100) / 100;
+        const total = Math.round(totalCarry * 100) / 100;
+
+        computedCarryForward[b.userId] = {
+          mealBalance,
+          expenseBalance,
+          total,
+        };
+      });
+
+      // Update in DB if different to keep it cached
+      const currentOpening = (month.opening_balances as Record<string, any>) ?? {};
+      const isDiff = JSON.stringify(currentOpening) !== JSON.stringify(computedCarryForward);
+      if (isDiff) {
+        await (supabase as any)
+          .from('months')
+          .update({ opening_balances: computedCarryForward })
+          .eq('id', month.id);
+      }
+
+      return computedCarryForward;
+    } catch {
+      const stored = (month.opening_balances as Record<string, any>) ?? {};
+      const parsed: Record<string, CarryForwardBalance> = {};
+      Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
+      return parsed;
+    }
+  }
+
+  const stored = (month.opening_balances as Record<string, any>) ?? {};
+  const parsed: Record<string, CarryForwardBalance> = {};
+  Object.entries(stored).forEach(([uid, v]) => { parsed[uid] = parseCarryForward(v); });
+  return parsed;
+}
+
 // ---- Balance calculation ----
 export function calculateBalances(
   expenses: Expense[],
   meals: Meal[],
   profiles: Profile[],
-  openingBalances: Record<string, number> = {},
+  openingBalances: Record<string, any> = {},
   fixedOverheadConfigs: import('./types').FixedOverheadConfig[] = [],
-  sharedExpenseConfigs: import('./types').SharedExpenseConfig[] = []
+  sharedExpenseConfigs: import('./types').SharedExpenseConfig[] = [],
+  // Credits from advance payments made in a previous month that cover THIS month.
+  // Map of userId → total advance credit amount.
+  advanceCredits: Record<string, number> = {}
 ): UserBalance[] {
   const activeProfiles = profiles.filter(p => p.status === 'active');
   const activeUserCount = activeProfiles.length || 1; // avoid divide-by-zero
@@ -56,7 +189,9 @@ export function calculateBalances(
   const perMealRate = totalMeals > 0 ? totalGrocery / totalMeals : 0;
 
   return activeProfiles.map(profile => {
-    const openingBalance = openingBalances[profile.id] ?? 0;
+    const rawOpening = openingBalances[profile.id];
+    const carry = parseCarryForward(rawOpening);
+    const openingBalance = carry.total;
 
     // Meals for this user (including guest meals)
     const userMeals = meals
@@ -86,10 +221,16 @@ export function calculateBalances(
       0
     );
 
-    const totalShare = overheadShare + mealCost + sharedExpenseShare;
+    // mealCost is intentionally excluded from totalShare.
+    // Grocery/meal costs are deferred: they are carried forward as debt into the next month
+    // when the admin closes the month (via handleCloseMonth in admin/month/page.tsx).
+    const totalShare = overheadShare + sharedExpenseShare;
 
-    // What this user has PAID (manually logged expenses)
+    // What this user has PAID (manually logged expenses).
+    // Advance payments (is_advance=true) are EXCLUDED: they belong to the target month's credit,
+    // not the current month's settlement. Including them here would cause double-counting.
     const totalPaid = expenses.reduce((sum, e) => {
+      if (e.is_advance) return sum; // skip — credited in advance_for_month instead
       const paidDetails = e.paid_by_details as Record<string, number> | null;
       if (paidDetails && Object.keys(paidDetails).length > 0) {
         return sum + (paidDetails[profile.id] ?? 0);
@@ -97,8 +238,11 @@ export function calculateBalances(
       return sum + (e.paid_by === profile.id ? e.amount : 0);
     }, 0);
 
-    // balance = paid - share + opening
-    const balance = totalPaid - totalShare + openingBalance;
+    // Advance credit: payments made in a previous month specifically for this month.
+    const advanceCredit = advanceCredits[profile.id] ?? 0;
+
+    // balance = paid + advanceCredit - share + opening
+    const balance = totalPaid + advanceCredit - totalShare + openingBalance;
 
     return {
       userId: profile.id,
@@ -108,12 +252,14 @@ export function calculateBalances(
       totalPaid,
       balance,
       openingBalance,
+      carryForward: carry,
       mealCount: userMeals,
       mealCost,
       overheadShare,
       fixedOverheadShare,
       variableShare,
       sharedExpenseShare,
+      advanceCredit,
     };
   });
 }

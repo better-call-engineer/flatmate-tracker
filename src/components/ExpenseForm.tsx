@@ -127,6 +127,21 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
   const [showAdvancePayOptions, setShowAdvancePayOptions] = useState(!!editExpense);
   const isGrocery = category === 'grocery';
 
+  // Advance payment state — only allowed for non-grocery, non-edit, current-month forms
+  const [isAdvance, setIsAdvance] = useState<boolean>(
+    editExpense ? (editExpense.is_advance ?? false) : false
+  );
+  // Compute next-month label from active month (e.g. '2026-08' → '2026-09')
+  const nextMonthLabel = (() => {
+    const [y, m] = activeMonthLabel.split('-').map(Number);
+    const next = new Date(y, m); // m is 0-indexed in Date constructor when we don't subtract 1
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const nextMonthDisplay = (() => {
+    const [y, m] = nextMonthLabel.split('-').map(Number);
+    return new Date(y, m - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  })();
+
   // Auto-calculate total amount when in Fixed mode
   useEffect(() => {
     if (splitType === 'fixed') {
@@ -333,7 +348,9 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
           split_type: finalSplitType,
           split_details: splitDetails,
           paid_by_details: finalPaidByDetails,
-          created_at: `${groceryDate}T${timePart}+06:00`
+          created_at: `${groceryDate}T${timePart}+06:00`,
+          is_advance: false,       // editing clears advance flag for simplicity
+          advance_for_month: null,
         }).eq('id', editExpense.id);
         if (error) throw error;
         toast.success('Expense updated!');
@@ -349,7 +366,9 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
           split_type: finalSplitType,
           split_details: splitDetails,
           paid_by_details: finalPaidByDetails,
-          created_at: `${groceryDate}T${format(new Date(), 'HH:mm:ss')}+06:00`
+          created_at: `${groceryDate}T${format(new Date(), 'HH:mm:ss')}+06:00`,
+          is_advance: isAdvance,
+          advance_for_month: isAdvance ? nextMonthLabel : null,
         };
         const { error } = await (supabase as any).from('expenses').insert(insertPayload);
         if (error) throw error;
@@ -954,6 +973,59 @@ export default function ExpenseForm({ onClose, onSaved, monthId, editExpense }: 
           )}
           </>
           )}
+          {/* Advance Payment Toggle — non-grocery only, not available when editing */}
+          {!isGrocery && !isEditing && (
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background: isAdvance ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.02)',
+                border: isAdvance ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.07)',
+                transition: 'all 0.2s',
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center"
+                    style={{
+                      background: isAdvance ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: isAdvance ? '#fbbf24' : '#475569',
+                    }}
+                  >
+                    <Calendar size={14} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold" style={{ color: isAdvance ? '#fcd34d' : '#94a3b8' }}>
+                      Pay in Advance
+                    </p>
+                    <p className="text-[10px]" style={{ color: '#475569' }}>
+                      {isAdvance ? `Covers: ${nextMonthDisplay}` : 'Pre-pay for next month (capped 1 month)'}
+                    </p>
+                  </div>
+                </div>
+                {/* Toggle switch */}
+                <button
+                  id="advance-payment-toggle"
+                  type="button"
+                  onClick={() => setIsAdvance(v => !v)}
+                  className="relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0"
+                  style={{
+                    background: isAdvance
+                      ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                      : 'rgba(255,255,255,0.1)',
+                    border: isAdvance ? '1px solid rgba(245,158,11,0.5)' : '1px solid rgba(255,255,255,0.15)',
+                  }}
+                  aria-label="Toggle advance payment"
+                >
+                  <span
+                    className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200"
+                    style={{ left: isAdvance ? '22px' : '2px' }}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             id="expense-submit-btn"
             type="submit"

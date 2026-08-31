@@ -4,8 +4,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { format, getDaysInMonth, isAfter, isWeekend, parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { calculateBalances, formatBDT, getOrCreateCurrentMonth, getMonthLabel } from '@/lib/finance';
-import { Expense, FixedOverheadConfig, Meal, Month, Profile, SharedExpenseConfig, UserBalance, CATEGORY_SHORT_LABELS } from '@/lib/types';
+import { calculateBalances, formatBDT, getOrCreateCurrentMonth, getMonthLabel, getOpeningBalancesForMonth, parseCarryForward } from '@/lib/finance';
+import { Expense, FixedOverheadConfig, Meal, Month, Profile, SharedExpenseConfig, UserBalance, CarryForwardBalance, CATEGORY_SHORT_LABELS, CATEGORY_LABELS } from '@/lib/types';
 import { toast } from 'sonner';
 import MealInputModal from '@/components/MealInputModal';
 import { CategoryIcon } from '@/components/GeometricIcons';
@@ -35,6 +35,7 @@ export default function DashboardPage() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const [showMonthlyBreakdown, setShowMonthlyBreakdown] = useState(false);
+  const [showTotalPaidBreakdown, setShowTotalPaidBreakdown] = useState(false);
 
   const today = new Date();
 
@@ -71,8 +72,29 @@ export default function DashboardPage() {
       setMyMeals(myMealMap);
       setMyGuestMeals(myGuestMealMap);
 
-      const openingBalances = (currentMonth.opening_balances as Record<string, number>) ?? {};
-      const computed = calculateBalances(allExpenses, allMeals, allProfiles, openingBalances, allOverheads, allShared);
+      const openingBalances = await getOpeningBalancesForMonth(currentMonth, months);
+      currentMonth.opening_balances = openingBalances as any;
+
+      // Fetch advance payments made in OTHER months but targeting this month
+      const advanceRes = await (supabase as any)
+        .from('expenses')
+        .select('*')
+        .eq('is_advance', true)
+        .eq('advance_for_month', currentMonth.label);
+      const advanceExpenses = (advanceRes.data ?? []) as Expense[];
+      const advanceCredits: Record<string, number> = {};
+      advanceExpenses.forEach(e => {
+        const paidDetails = e.paid_by_details as Record<string, number> | null;
+        if (paidDetails && Object.keys(paidDetails).length > 0) {
+          Object.entries(paidDetails).forEach(([uid, amt]) => {
+            advanceCredits[uid] = (advanceCredits[uid] ?? 0) + amt;
+          });
+        } else {
+          advanceCredits[e.paid_by] = (advanceCredits[e.paid_by] ?? 0) + e.amount;
+        }
+      });
+
+      const computed = calculateBalances(allExpenses, allMeals, allProfiles, openingBalances, allOverheads, allShared, advanceCredits);
       setMyBalance(computed.find(b => b.userId === profile.id) ?? null);
     } catch {
       toast.error('Failed to load dashboard data');
@@ -208,12 +230,30 @@ export default function DashboardPage() {
   const totalShared = sharedWithAmount.reduce((s, c) => s + c.total_amount / activeCount, 0);
 
   // ── Balance stats ─────────────────────────────────────────────────────────
-  const monthlyExpenseVal = myBalance
-    ? myBalance.fixedOverheadShare + myBalance.sharedExpenseShare + totalMyGrocerySpent
-    : 0;
-  const totalPaidVal = myBalance?.totalPaid ?? 0;
+  // Carry-forward balances from preceding closed month (meal balance + expense balance).
+  const carry = myBalance?.carryForward ?? { mealBalance: 0, expenseBalance: 0, total: 0 };
+
+  // 1. Dedicated Previous Month Meal Adjustment
+  const prevMealDue = carry.mealBalance < 0 ? Math.abs(carry.mealBalance) : 0;
+  const prevMealOverpaid = carry.mealBalance > 0 ? carry.mealBalance : 0;
+
+  // 2. Previous Month Monthly Expense Adjustment
+  const prevExpenseDue = carry.expenseBalance < 0 ? Math.abs(carry.expenseBalance) : 0;
+  const prevExpenseOverpaid = carry.expenseBalance > 0 ? carry.expenseBalance : 0;
+
+  // Monthly Expense = Fixed + Shared + Previous Month Meal Due + Previous Month Expense Due
+  const baseExpenses = myBalance ? myBalance.fixedOverheadShare + myBalance.sharedExpenseShare : 0;
+  const monthlyExpenseVal = baseExpenses + prevMealDue + prevExpenseDue;
+
+  // Total Paid = current month non-grocery paid + advance payments for this month + previous month's overpaid credits
+  const advanceCredit = myBalance?.advanceCredit ?? 0;
+  const currentMonthPaid = myBalance ? (myBalance.totalPaid - totalMyGrocerySpent) : 0;
+  const totalPaidVal = currentMonthPaid + advanceCredit + prevExpenseOverpaid + prevMealOverpaid;
+
+  // Due = Monthly Expense - Total Paid
   const dueVal = monthlyExpenseVal - totalPaidVal;
-  const isOverpaid = dueVal < 0;
+  const isSettled = Math.abs(dueVal) < 0.5;
+  const isOverpaid = !isSettled && dueVal < -0.5;
   const calendarProps = {
     month,
     currentMonthLabel,
@@ -403,25 +443,29 @@ export default function DashboardPage() {
                 value={monthlyExpenseVal}
                 icon={<IconWallet size={15} />}
                 isPrimary
-                suffix="Fixed + Shared + Grocery"
+                suffix={prevMealDue > 0 || prevExpenseDue > 0 ? 'Fixed + Shared + Prev. Due' : 'Fixed + Shared'}
                 clickable
               />
             </button>
             <BentoStatCard
-              label={isOverpaid ? 'Overdue' : 'Due'}
-              value={Math.abs(dueVal)}
+              label={isSettled ? 'Due' : isOverpaid ? 'Overpaid' : 'Due'}
+              value={isSettled ? 0 : Math.abs(dueVal)}
               icon={<IconTrendDown size={15} />}
-              accentColor={isOverpaid ? 'emerald' : 'rose'}
-              suffix={isOverpaid ? 'Flat owes you' : 'You owe flat'}
+              accentColor={isSettled ? 'emerald' : isOverpaid ? 'emerald' : 'rose'}
+              suffix={isSettled ? 'All settled' : isOverpaid ? 'Flat owes you' : 'You owe flat'}
             />
 
-            {/* Row 2 — Total Paid (normal card) */}
-            <BentoStatCard
-              label="Total Paid"
-              value={totalPaidVal}
-              icon={<IconTrendUp size={15} />}
-              accentColor="violet"
-            />
+            {/* Row 2 — Total Paid (clickable for breakdown modal) */}
+            <button id="total-paid-tile" onClick={() => setShowTotalPaidBreakdown(true)}
+              className="text-left w-full block focus:outline-none group">
+              <BentoStatCard
+                label="Total Paid"
+                value={totalPaidVal}
+                icon={<IconTrendUp size={15} />}
+                accentColor="violet"
+                clickable
+              />
+            </button>
 
             {/* Row 2 — Meal Expense Breakdown tile (h-[104px] matching other cards) */}
             {(() => {
@@ -569,8 +613,19 @@ export default function DashboardPage() {
         myOverheads={myOverheads}
         sharedWithAmount={sharedWithAmount}
         activeCount={activeCount}
-        totalMyGrocerySpent={totalMyGrocerySpent}
+        carryForward={carry}
         monthlyExpenseVal={monthlyExpenseVal}
+      />
+
+      {/* Total Paid Breakdown Modal */}
+      <TotalPaidBreakdownModal
+        open={showTotalPaidBreakdown}
+        onClose={() => setShowTotalPaidBreakdown(false)}
+        expenses={expenses}
+        profileId={profile?.id ?? ''}
+        advanceCreditsForUser={advanceCredit}
+        carryForward={carry}
+        totalPaidVal={totalPaidVal}
       />
     </div>
   );
@@ -725,28 +780,31 @@ function MealCalendar({
 }
 
 // ── Bento Stat Card ───────────────────────────────────────────────────────────
+// ── Bento Stat Card ───────────────────────────────────────────────────────────
 // ─── Monthly Breakdown Modal ──────────────────────────────────────────────────
 function MonthlyBreakdownModal({
   open, onClose,
-  myOverheads, sharedWithAmount, activeCount, totalMyGrocerySpent, monthlyExpenseVal,
+  myOverheads, sharedWithAmount, activeCount, carryForward, monthlyExpenseVal,
 }: {
   open: boolean;
   onClose: () => void;
   myOverheads: any[];
   sharedWithAmount: any[];
   activeCount: number;
-  totalMyGrocerySpent: number;
+  carryForward: CarryForwardBalance;
   monthlyExpenseVal: number;
 }) {
   if (!open) return null;
   const totalFixed  = myOverheads.reduce((s: number, c: any) => s + c.amount, 0);
   const totalShared = sharedWithAmount.reduce((s: number, c: any) => s + c.total_amount / activeCount, 0);
 
-  const Row = ({ label, amount, accent }: { label: string; amount: number; accent?: string }) => (
+  const Row = ({ label, amount, accent, prefix }: { label: string; amount: number; accent?: string; prefix?: string }) => (
     <div className="flex items-center justify-between py-2"
       style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
       <span className="text-xs font-medium capitalize" style={{ color: '#94a3b8' }}>{label}</span>
-      <span className="text-sm font-bold" style={{ color: accent ?? '#f1f5f9' }}>{formatBDT(amount)}</span>
+      <span className="text-sm font-bold" style={{ color: accent ?? '#f1f5f9' }}>
+        {prefix ?? ''}{formatBDT(amount)}
+      </span>
     </div>
   );
 
@@ -810,15 +868,180 @@ function MonthlyBreakdownModal({
             </>
           )}
 
-          {/* Grocery */}
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>Grocery</p>
-          <Row label="Grocery / Bazaar" amount={totalMyGrocerySpent} accent="#fbbf24" />
+          {/* Previous Month Meal Adjustment (Dedicated Segment!) */}
+          <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>
+            Prev. Month Meal Adjustment
+          </p>
+          {carryForward.mealBalance < 0 ? (
+            <Row label="Prev. Month Meal Due" amount={Math.abs(carryForward.mealBalance)} accent="#fda4af" prefix="+" />
+          ) : carryForward.mealBalance > 0 ? (
+            <Row label="Prev. Month Meal Overpaid" amount={carryForward.mealBalance} accent="#6ee7b7" prefix="-" />
+          ) : (
+            <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span className="text-xs font-medium" style={{ color: '#94a3b8' }}>Adjustment</span>
+              <span className="text-sm font-bold" style={{ color: '#94a3b8' }}>৳0</span>
+            </div>
+          )}
+
+          {/* Previous Month Monthly Expense Overdue / Overpaid */}
+          {carryForward.expenseBalance < 0 && (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>
+                Prev. Month Expense Due
+              </p>
+              <Row label="Unpaid Monthly Expense Due" amount={Math.abs(carryForward.expenseBalance)} accent="#fda4af" prefix="+" />
+            </>
+          )}
+
+          {carryForward.expenseBalance > 0 && (
+            <div className="flex items-start gap-2 mt-3 px-3 py-2.5 rounded-xl"
+              style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
+              <span style={{ color: '#34d399', fontSize: 13 }}>✓</span>
+              <p className="text-[10px] leading-relaxed" style={{ color: '#a7f3d0' }}>
+                Prev. month expense overpayment ({formatBDT(carryForward.expenseBalance)}) is credited to your <strong>Total Paid</strong> tile.
+              </p>
+            </div>
+          )}
+
+          {/* Grocery deferred note */}
+          <div className="flex items-start gap-2 mt-3 px-3 py-2.5 rounded-xl"
+            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
+            <span style={{ color: '#fbbf24', fontSize: 13, lineHeight: 1 }}>⏭</span>
+            <p className="text-[10px] leading-relaxed" style={{ color: '#fcd34d' }}>
+              Current month&apos;s meal &amp; grocery costs are deferred and will be adjusted in next month&apos;s billing.
+            </p>
+          </div>
 
           {/* Grand Total */}
           <div className="flex items-center justify-between mt-4 mb-2 pt-3"
             style={{ borderTop: '2px solid rgba(16,185,129,0.3)' }}>
             <span className="text-sm font-bold" style={{ color: '#f1f5f9' }}>Total</span>
             <span className="text-base font-extrabold" style={{ color: '#10b981' }}>{formatBDT(monthlyExpenseVal)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Total Paid Breakdown Modal ───────────────────────────────────────────────
+function TotalPaidBreakdownModal({
+  open,
+  onClose,
+  expenses,
+  profileId,
+  advanceCreditsForUser,
+  carryForward,
+  totalPaidVal,
+}: {
+  open: boolean;
+  onClose: () => void;
+  expenses: Expense[];
+  profileId: string;
+  advanceCreditsForUser: number;
+  carryForward: CarryForwardBalance;
+  totalPaidVal: number;
+}) {
+  if (!open) return null;
+
+  // Direct non-grocery payments made by the user this month
+  const myDirectExpenses = expenses.filter(e => {
+    if (e.category === 'grocery' || e.is_advance) return false;
+    const paidDetails = e.paid_by_details as Record<string, number> | null;
+    if (paidDetails && (paidDetails[profileId] ?? 0) > 0) return true;
+    return e.paid_by === profileId;
+  });
+
+  const Row = ({ label, amount, accent, sub }: { label: string; amount: number; accent?: string; sub?: string }) => (
+    <div className="flex items-center justify-between py-2"
+      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <div className="flex flex-col">
+        <span className="text-xs font-medium capitalize" style={{ color: '#f1f5f9' }}>{label}</span>
+        {sub && <span className="text-[10px]" style={{ color: '#64748b' }}>{sub}</span>}
+      </div>
+      <span className="text-sm font-bold" style={{ color: accent ?? '#c084fc' }}>{formatBDT(amount)}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}>
+      <div className="w-full max-w-xs rounded-2xl overflow-hidden"
+        style={{ background: '#0d1220', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(168,85,247,0.15)' }}>
+              <IconTrendUp size={14} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: '#94a3b8' }}>Total Paid Breakdown</p>
+              <p className="text-lg font-extrabold" style={{ color: '#a855f7' }}>{formatBDT(totalPaidVal)}</p>
+            </div>
+          </div>
+          <button onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+            style={{ background: 'rgba(255,255,255,0.06)' }}
+            aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-3 space-y-3">
+          {/* Direct payments this month */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
+              Direct Payments (This Month)
+            </p>
+            {myDirectExpenses.length === 0 ? (
+              <p className="text-xs py-1" style={{ color: '#64748b' }}>No direct payments logged</p>
+            ) : (
+              myDirectExpenses.map(e => {
+                const paidDetails = e.paid_by_details as Record<string, number> | null;
+                const amt = paidDetails && paidDetails[profileId] ? paidDetails[profileId] : e.amount;
+                return (
+                  <Row key={e.id} label={CATEGORY_LABELS[e.category as keyof typeof CATEGORY_LABELS] ?? e.category} amount={amt} sub={e.description || undefined} />
+                );
+              })
+            )}
+          </div>
+
+          {/* Advance payments credit */}
+          {advanceCreditsForUser > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
+                Advance Payment Credit
+              </p>
+              <Row label="Paid in advance for this month" amount={advanceCreditsForUser} accent="#fbbf24" />
+            </div>
+          )}
+
+          {/* Previous month overpaid credits */}
+          {(carryForward.expenseBalance > 0 || carryForward.mealBalance > 0) && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
+                Previous Month Overpayments
+              </p>
+              {carryForward.expenseBalance > 0 && (
+                <Row label="Prev. Month Expense Overpaid" amount={carryForward.expenseBalance} accent="#34d399" sub="Credited from previous month" />
+              )}
+              {carryForward.mealBalance > 0 && (
+                <Row label="Prev. Month Meal Overpaid" amount={carryForward.mealBalance} accent="#34d399" sub="Credited from previous month" />
+              )}
+            </div>
+          )}
+
+          {/* Grand Total */}
+          <div className="flex items-center justify-between mt-4 mb-2 pt-3"
+            style={{ borderTop: '2px solid rgba(168,85,247,0.3)' }}>
+            <span className="text-sm font-bold" style={{ color: '#f1f5f9' }}>Total Paid</span>
+            <span className="text-base font-extrabold" style={{ color: '#a855f7' }}>{formatBDT(totalPaidVal)}</span>
           </div>
         </div>
       </div>

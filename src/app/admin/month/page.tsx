@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Month, Profile, Expense, Meal, Settlement } from '@/lib/types';
+import { Month, Profile, Expense, Meal, Settlement, CarryForwardBalance } from '@/lib/types';
 import {
   calculateBalances,
   computeWhoOwesWhom,
@@ -11,6 +11,8 @@ import {
   getAllMonths,
   getMonthLabel,
   getOrCreateCurrentMonth,
+  getOpeningBalancesForMonth,
+  parseCarryForward,
 } from '@/lib/finance';
 import { format, addMonths, parseISO } from 'date-fns';
 import { toast } from 'sonner';
@@ -24,10 +26,13 @@ export default function MonthManagerPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [advanceCredits, setAdvanceCredits] = useState<Record<string, number>>({});
   const [closing, setClosing] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [fixedOverheads, setFixedOverheads] = useState<any[]>([]);
+  const [sharedExpenses, setSharedExpenses] = useState<any[]>([]);
+  const [openingBalances, setOpeningBalances] = useState<Record<string, CarryForwardBalance>>({});
 
   const fetchAll = useCallback(async () => {
     const [monthsData, cm] = await Promise.all([
@@ -37,31 +42,40 @@ export default function MonthManagerPage() {
     setMonths(monthsData);
     setCurrentMonth(cm);
 
-    const [profRes, expRes, mealRes, settleRes] = await Promise.all([
-      (supabase as any).from('profiles').select('*').eq('status', 'active'),
-      (supabase as any).from('expenses').select('*').eq('month_id', cm.id),
-      (supabase as any).from('meals').select('*').eq('month_id', cm.id),
-      (supabase as any).from('settlements').select('*').eq('month_id', cm.id),
-    ]);
-
-    setProfiles(profRes.data ?? []);
-    setExpenses(expRes.data ?? []);
-    setMeals(mealRes.data ?? []);
-    
     const latestMonth = monthsData.sort((a, b) => b.label.localeCompare(a.label))[0];
-    if (latestMonth) {
-        setCurrentMonth(latestMonth);
-        const [profRes, expRes, mealRes, settleRes] = await Promise.all([
+    const targetMonth = latestMonth || cm;
+    if (targetMonth) {
+        setCurrentMonth(targetMonth);
+        const [profRes, expRes, mealRes, settleRes, advanceRes, fixedRes, sharedRes] = await Promise.all([
           (supabase as any).from('profiles').select('*').eq('status', 'active'),
-          (supabase as any).from('expenses').select('*').eq('month_id', latestMonth.id),
-          (supabase as any).from('meals').select('*').eq('month_id', latestMonth.id),
-          (supabase as any).from('settlements').select('*').eq('month_id', latestMonth.id),
+          (supabase as any).from('expenses').select('*').eq('month_id', targetMonth.id),
+          (supabase as any).from('meals').select('*').eq('month_id', targetMonth.id),
+          (supabase as any).from('settlements').select('*').eq('month_id', targetMonth.id),
+          (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', targetMonth.label),
+          (supabase as any).from('fixed_overhead_configs').select('*').eq('month_id', targetMonth.id),
+          (supabase as any).from('shared_expense_configs').select('*').eq('month_id', targetMonth.id),
         ]);
 
         setProfiles(profRes.data ?? []);
         setExpenses(expRes.data ?? []);
         setMeals(mealRes.data ?? []);
         setSettlements(settleRes.data ?? []);
+        setFixedOverheads(fixedRes.data ?? []);
+        setSharedExpenses(sharedRes.data ?? []);
+
+        const credits: Record<string, number> = {};
+        (advanceRes.data ?? []).forEach((e: Expense) => {
+          const pd = e.paid_by_details as Record<string, number> | null;
+          if (pd && Object.keys(pd).length > 0) {
+            Object.entries(pd).forEach(([uid, amt]) => { credits[uid] = (credits[uid] ?? 0) + amt; });
+          } else {
+            credits[e.paid_by] = (credits[e.paid_by] ?? 0) + e.amount;
+          }
+        });
+        setAdvanceCredits(credits);
+
+        const openBalances = await getOpeningBalancesForMonth(targetMonth, monthsData);
+        setOpeningBalances(openBalances);
     }
     setLoading(false);
   }, []);
@@ -74,30 +88,75 @@ export default function MonthManagerPage() {
     if (!selected) return;
     setCurrentMonth(selected);
 
-    const [expRes, mealRes, settleRes] = await Promise.all([
+    const [expRes, mealRes, settleRes, advanceRes, fixedRes, sharedRes] = await Promise.all([
       (supabase as any).from('expenses').select('*').eq('month_id', monthId),
       (supabase as any).from('meals').select('*').eq('month_id', monthId),
       (supabase as any).from('settlements').select('*').eq('month_id', monthId),
+      (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', selected.label),
+      (supabase as any).from('fixed_overhead_configs').select('*').eq('month_id', monthId),
+      (supabase as any).from('shared_expense_configs').select('*').eq('month_id', monthId),
     ]);
 
     setExpenses(expRes.data ?? []);
     setMeals(mealRes.data ?? []);
     setSettlements(settleRes.data ?? []);
+    setFixedOverheads(fixedRes.data ?? []);
+    setSharedExpenses(sharedRes.data ?? []);
+
+    const credits: Record<string, number> = {};
+    (advanceRes.data ?? []).forEach((e: Expense) => {
+      const pd = e.paid_by_details as Record<string, number> | null;
+      if (pd && Object.keys(pd).length > 0) {
+        Object.entries(pd).forEach(([uid, amt]) => { credits[uid] = (credits[uid] ?? 0) + amt; });
+      } else {
+        credits[e.paid_by] = (credits[e.paid_by] ?? 0) + e.amount;
+      }
+    });
+    setAdvanceCredits(credits);
+
+    const openBalances = await getOpeningBalancesForMonth(selected, months);
+    setOpeningBalances(openBalances);
   }, [months]);
 
-  const openingBalances = (currentMonth?.opening_balances as Record<string, number>) ?? {};
-  const balances = calculateBalances(expenses, meals, profiles, openingBalances);
+  const balances = calculateBalances(expenses, meals, profiles, openingBalances, fixedOverheads, sharedExpenses, advanceCredits);
   const whoOwes = computeWhoOwesWhom(balances, profiles);
 
   const handleCloseMonth = async () => {
     if (!currentMonth) return;
-    if (!confirm('Close this month? This will LOCK all expenses and meal inputs. Carry-forward balances will be set for the new month.')) return;
+    if (!confirm('Close this month? This will LOCK all expenses and meal inputs. Carry-forward meal balances will be set for the new month.')) return;
 
     setClosing(true);
     try {
-      // Compute carry-forward balances
-      const carryForward: Record<string, number> = {};
-      balances.forEach(b => { carryForward[b.userId] = b.balance; });
+      // Compute carry-forward balances for the next month (same logic as getOpeningBalancesForMonth).
+      // We derive components from the already-correct b.balance to avoid double-counting.
+      const carryForward: Record<string, CarryForwardBalance> = {};
+      balances.forEach(b => {
+        const userGrocerySpent = expenses
+          .filter(e => e.category === 'grocery')
+          .reduce((sum, e) => {
+            const paidDetails = e.paid_by_details as Record<string, number> | null;
+            if (paidDetails && Object.keys(paidDetails).length > 0) {
+              return sum + (paidDetails[b.userId] ?? 0);
+            }
+            return sum + (e.paid_by === b.userId ? e.amount : 0);
+          }, 0);
+
+        // mealBalance: grocery spent vs meal cost
+        const mealBalance = Math.round((userGrocerySpent - b.mealCost) * 100) / 100;
+
+        // totalCarry: the single reliable number from the balance engine (mealCost deferred)
+        // expenseBalance = totalCarry - mealBalance
+        // If overheads are fully settled: expenseBalance == 0 ✓
+        const totalCarry = Math.round((b.balance - b.mealCost) * 100) / 100;
+        const expenseBalance = Math.round((totalCarry - mealBalance) * 100) / 100;
+        const total = Math.round(totalCarry * 100) / 100;
+
+        carryForward[b.userId] = {
+          mealBalance,
+          expenseBalance,
+          total,
+        };
+      });
 
       // Fetch configs for the current month to carry-over
       const [fixedRes, sharedRes] = await Promise.all([

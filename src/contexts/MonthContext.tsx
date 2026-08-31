@@ -59,11 +59,16 @@ export function MonthProvider({ children }: { children: React.ReactNode }) {
       if (storedIsValid) {
         setSelectedMonthIdState(stored!);
       } else if (all.length > 0) {
-        // Default to current month
-        const found = all.find(m => m.label === currentMonthLabel);
-        if (found) {
-          setSelectedMonthId(found.id);
+        // Default to the latest OPEN month (not closed). This handles early closes:
+        // when admin closes a month and creates the next one, we auto-switch to the new month.
+        const latestOpen = all
+          .filter(m => !m.is_closed)
+          .sort((a, b) => b.label.localeCompare(a.label))[0];
+
+        if (latestOpen) {
+          setSelectedMonthId(latestOpen.id);
         } else {
+          // All months are closed — fall back to creating/finding the current calendar month
           const current = await getOrCreateCurrentMonth();
           setSelectedMonthId(current.id);
           const updated = await getAllMonths();

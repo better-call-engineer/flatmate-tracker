@@ -3,16 +3,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Expense, Month, Profile } from '@/lib/types';
-import { CATEGORY_LABELS, CATEGORY_ICONS } from '@/lib/types';
-import { getOrCreateCurrentMonth, formatBDT, getMonthLabel } from '@/lib/finance';
-import { format, parseISO } from 'date-fns';
-import { toast } from 'sonner';
+import { Expense, Month, Profile, CATEGORY_LABELS, CATEGORY_ICONS } from '@/lib/types';
+import { getOrCreateCurrentMonth, getOpeningBalancesForMonth, parseCarryForward, formatBDT, getMonthLabel } from '@/lib/finance';
+import { useSelectedMonth } from '@/contexts/MonthContext';
 import { Plus, Trash2, Lock, Filter, Pencil, Calculator as CalculatorIcon } from 'lucide-react';
 import ExpenseForm from '@/components/ExpenseForm';
 import Calculator from '@/components/Calculator';
-import { useSelectedMonth } from '@/contexts/MonthContext';
 import { CategoryIcon } from '@/components/GeometricIcons';
+import { format, parseISO } from 'date-fns';
+import { toast } from 'sonner';
 
 export default function ExpensesPage() {
   const { profile } = useAuth();
@@ -32,12 +31,46 @@ export default function ExpensesPage() {
     const currentMonth = months.find(m => m.id === selectedMonthId) || await getOrCreateCurrentMonth();
     setMonth(currentMonth);
 
-    const [expRes, profRes] = await Promise.all([
+    const [expRes, advanceRes, profRes] = await Promise.all([
       (supabase as any).from('expenses').select('*').eq('month_id', currentMonth.id).order('created_at', { ascending: false }),
+      (supabase as any).from('expenses').select('*').eq('is_advance', true).eq('advance_for_month', currentMonth.label).order('created_at', { ascending: false }),
       (supabase as any).from('profiles').select('*').eq('status', 'active'),
     ]);
 
-    setExpenses(expRes.data ?? []);
+    const monthExp = (expRes.data ?? []) as Expense[];
+    const advanceExp = (advanceRes.data ?? []) as Expense[];
+    const existingIds = new Set(monthExp.map(e => e.id));
+    const combined = [...monthExp, ...advanceExp.filter(e => !existingIds.has(e.id))];
+
+    // Include previous month overpayment credit as adjustment entry
+    const openBalances = await getOpeningBalancesForMonth(currentMonth, months);
+    const [y, m] = currentMonth.label.split('-').map(Number);
+    const prevMonthName = new Date(y, m - 2, 1).toLocaleString('default', { month: 'short' });
+
+    Object.entries(openBalances).forEach(([uid, carry]) => {
+      const c = parseCarryForward(carry);
+      if (c.expenseBalance > 0) {
+        combined.push({
+          id: `overpaid-credit-${uid}-${currentMonth.id}`,
+          month_id: currentMonth.id,
+          paid_by: uid,
+          category: 'misc',
+          description: `Overpayment credit carried from ${prevMonthName} monthly expenses`,
+          amount: c.expenseBalance,
+          paid_full: true,
+          split_type: 'even',
+          split_details: {},
+          paid_by_details: { [uid]: c.expenseBalance },
+          created_at: `${currentMonth.label}-01T00:00:00+06:00`,
+          is_advance: false,
+          advance_for_month: null,
+          is_credit_adjustment: true,
+          credit_from_month: prevMonthName,
+        } as any);
+      }
+    });
+
+    setExpenses(combined);
     setProfiles(profRes.data ?? []);
     setLoading(false);
   }, [selectedMonthId, months]);
@@ -252,6 +285,7 @@ export default function ExpensesPage() {
               expense={expense}
               profileMap={profileMap}
               profile={profile}
+              month={month}
               isLocked={isLocked}
               onEdit={e => { setEditExpense(e); setShowForm(true); }}
               onDelete={id => setDeleteConfirmId(id)}
@@ -332,6 +366,7 @@ function ExpenseTile({
   profileMap,
   profile,
   isLocked,
+  month,
   onEdit,
   onDelete,
 }: {
@@ -339,6 +374,7 @@ function ExpenseTile({
   profileMap: Map<string, Profile>;
   profile: Profile | null;
   isLocked?: boolean;
+  month: Month | null;
   onEdit: (e: Expense) => void;
   onDelete: (id: string) => void;
 }) {
@@ -387,7 +423,7 @@ function ExpenseTile({
         </div>
 
         {/* Edit / Delete actions */}
-        {(isMyExpense || profile?.role === 'admin') && !isLocked && (
+        {(isMyExpense || profile?.role === 'admin') && !isLocked && !(expense as any).is_credit_adjustment && (
           <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onEdit(expense)}
@@ -411,6 +447,42 @@ function ExpenseTile({
       {expense.description && (
         <p className="text-xs text-slate-400 line-clamp-2">{expense.description}</p>
       )}
+
+      {/* Credit Adjustment Badge */}
+      {(expense as any).is_credit_adjustment && (
+        <div
+          className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full"
+          style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)' }}
+        >
+          <span style={{ color: '#34d399', fontSize: 11 }}>✓</span>
+          <span className="text-[10px] font-bold" style={{ color: '#6ee7b7' }}>
+            Overpayment Credit from {(expense as any).credit_from_month || 'Prev. Month'}
+          </span>
+        </div>
+      )}
+
+      {/* Advance Payment Badge */}
+      {expense.is_advance && expense.advance_for_month && (() => {
+        const [targetY, targetM] = expense.advance_for_month.split('-').map(Number);
+        const targetMonthName = new Date(targetY, targetM - 1).toLocaleString('default', { month: 'short' });
+        const createdDate = parseISO(expense.created_at);
+        const createdMonthName = format(createdDate, 'MMM');
+        const isCurrentTarget = month?.label === expense.advance_for_month;
+
+        return (
+          <div
+            className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full"
+            style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}
+          >
+            <span style={{ color: '#fbbf24', fontSize: 11 }}>⏭</span>
+            <span className="text-[10px] font-bold" style={{ color: '#fcd34d' }}>
+              {isCurrentTarget
+                ? `Advance from ${createdMonthName}`
+                : `Advance for ${targetMonthName}`}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Bottom Row: Payer Avatar & Names + Amount */}
       <div className="pt-2.5 border-t border-white/5 flex items-end justify-between gap-2">

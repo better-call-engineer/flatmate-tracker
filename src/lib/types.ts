@@ -78,6 +78,12 @@ export const CATEGORY_ICONS: Record<ExpenseCategory, string> = {
   grocery:     '',
 };
 
+export interface CarryForwardBalance {
+  mealBalance: number;    // e.g. -1265 (owed/due) or +300 (overpaid)
+  expenseBalance: number; // e.g. +150 (overpaid) or -500 (due)
+  total: number;          // net total = mealBalance + expenseBalance
+}
+
 export interface UserBalance {
   userId: string;
   username: string;
@@ -86,12 +92,14 @@ export interface UserBalance {
   totalPaid: number;
   balance: number; // positive = flat owes user; negative = user owes flat
   openingBalance: number;
+  carryForward?: CarryForwardBalance;
   mealCount: number;
   mealCost: number;
   overheadShare: number;
   fixedOverheadShare: number; // from admin-configured rent/maid/internet
   variableShare: number;      // from manually logged electricity/gas/misc expenses
   sharedExpenseShare: number; // from admin-configured shared gas/electricity (total ÷ active users)
+  advanceCredit: number;      // credit from advance payments made in the previous month for this month
 }
 
 export interface WhoOwesWhom {
