@@ -70,7 +70,9 @@ export default function AdminOverviewPage() {
   const balances = calculateBalances(expenses, meals, profiles, openingBalances, fixedOverheads, sharedExpenses);
   const whoOwes = computeWhoOwesWhom(balances, profiles);
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const totalMeals = meals.reduce((s, m) => s + m.count, 0);
+  const totalMeals = meals.reduce((s, m) => s + m.count + ((m as any).guest_count || 0), 0);
+  const totalGrocery = expenses.filter(e => e.category === 'grocery').reduce((s, e) => s + e.amount, 0);
+  const perMealRate = totalMeals > 0 ? totalGrocery / totalMeals : 0;
 
   if (loading) {
     return (
@@ -181,7 +183,7 @@ export default function AdminOverviewPage() {
           </div>
           <div className="grid grid-cols-4 gap-2">
             {profiles.map(p => {
-              const userMeals = meals.filter(m => m.user_id === p.id).reduce((s, m) => s + m.count, 0);
+              const userMeals = meals.filter(m => m.user_id === p.id).reduce((s, m) => s + m.count + ((m as any).guest_count || 0), 0);
               const pct = totalMeals > 0 ? (userMeals / totalMeals) * 100 : 0;
               return (
                 <div key={p.id} className="text-center">
@@ -203,6 +205,84 @@ export default function AdminOverviewPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* ── Meal Expenditure Summary ── */}
+        <div className="bento-card p-4 col-span-2">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center icon-container-cyan">
+              <IconWallet size={13} />
+            </div>
+            <span className="text-sm font-semibold" style={{ color: '#f1f5f9' }}>Meal Expenditure Summary</span>
+            <span className="ml-auto text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.2)' }}>
+              ৳{perMealRate.toFixed(1)}/meal
+            </span>
+          </div>
+
+          {/* Header row */}
+          <div className="grid grid-cols-4 text-[9px] font-bold uppercase tracking-wider px-1 mb-2"
+            style={{ color: '#475569' }}>
+            <span>User</span>
+            <span className="text-center">Meals</span>
+            <span className="text-center">Grocery Paid</span>
+            <span className="text-right">Due / Overpaid</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {profiles.map(p => {
+              const userMeals = meals.filter(m => m.user_id === p.id)
+                .reduce((s, m) => s + m.count + ((m as any).guest_count || 0), 0);
+              const mealCost = userMeals * perMealRate;
+              const groceryPaid = expenses
+                .filter(e => e.category === 'grocery')
+                .reduce((sum, e) => {
+                  const det = e.paid_by_details as Record<string, number> | null;
+                  if (det && Object.keys(det).length > 0) return sum + (det[p.id] ?? 0);
+                  return sum + (e.paid_by === p.id ? e.amount : 0);
+                }, 0);
+              const diff = groceryPaid - mealCost;
+              const isOver = diff >= 0;
+              return (
+                <div key={p.id} className="grid grid-cols-4 items-center px-2 py-1.5 rounded-xl transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  {/* User */}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-extrabold flex-shrink-0"
+                      style={{ backgroundColor: p.avatar_color }}>
+                      {p.username.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-xs font-semibold truncate" style={{ color: '#94a3b8' }}>{p.username}</span>
+                  </div>
+                  {/* Meals */}
+                  <div className="text-center">
+                    <span className="text-xs font-bold" style={{ color: '#f1f5f9' }}>{userMeals}</span>
+                    <span className="text-[9px] ml-1" style={{ color: '#475569' }}>({formatBDT(mealCost)})</span>
+                  </div>
+                  {/* Grocery Paid */}
+                  <div className="text-center">
+                    <span className="text-xs font-bold" style={{ color: '#67e8f9' }}>{formatBDT(groceryPaid)}</span>
+                  </div>
+                  {/* Due / Overpaid */}
+                  <div className="text-right">
+                    <span className="text-xs font-bold" style={{ color: isOver ? '#6ee7b7' : '#fda4af' }}>
+                      {isOver ? '+' : '-'}{formatBDT(Math.abs(diff))}
+                    </span>
+                    <p className="text-[8px] font-semibold" style={{ color: isOver ? '#059669' : '#e11d48' }}>
+                      {isOver ? 'overpaid' : 'due'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Totals footer */}
+          <div className="mt-3 pt-3 flex items-center justify-between"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+            <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#475569' }}>Total Grocery</span>
+            <span className="text-sm font-extrabold" style={{ color: '#fbbf24' }}>{formatBDT(totalGrocery)}</span>
           </div>
         </div>
       </div>

@@ -25,6 +25,7 @@ export default function MonthManagerPage() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [closing, setClosing] = useState(false);
+  const [reopening, setReopening] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showSettleModal, setShowSettleModal] = useState(false);
 
@@ -143,7 +144,6 @@ export default function MonthManagerPage() {
         nextMonthData = data;
       }
 
-
       // Copy fixed overheads
       if (fixedRes.data && fixedRes.data.length > 0) {
         const nextFixed = fixedRes.data.map((c: any) => ({
@@ -171,6 +171,27 @@ export default function MonthManagerPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to close month');
     } finally {
       setClosing(false);
+    }
+  };
+
+  // ── Reopen a closed month ─────────────────────────────────────────────────
+  const handleReopenMonth = async () => {
+    if (!currentMonth) return;
+    if (!confirm(`Reopen "${getMonthLabel(currentMonth.label)}"? This will unlock all expenses and meal inputs for this month.`)) return;
+
+    setReopening(true);
+    try {
+      const { error } = await (supabase as any)
+        .from('months')
+        .update({ is_closed: false, closed_at: null })
+        .eq('id', currentMonth.id);
+      if (error) throw error;
+      toast.success(`${getMonthLabel(currentMonth.label)} has been reopened.`);
+      fetchAll();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reopen month');
+    } finally {
+      setReopening(false);
     }
   };
 
@@ -257,6 +278,7 @@ export default function MonthManagerPage() {
           )}
         </div>
 
+        {/* Open month: show stats + close button */}
         {!isCurrentClosed && (
           <>
             <div className="grid grid-cols-3 gap-3 text-center mb-4">
@@ -298,6 +320,36 @@ export default function MonthManagerPage() {
               {closing ? 'Closing...' : 'Close Month & Generate New Month'}
             </button>
           </>
+        )}
+
+        {/* Closed month: show reopen button */}
+        {isCurrentClosed && (
+          <div className="mt-1">
+            <div className="rounded-xl p-3 mb-3"
+              style={{ background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)' }}>
+              <div className="flex items-center gap-2 mb-1">
+                <Lock className="w-4 h-4" style={{ color: '#f43f5e' }} />
+                <p className="text-sm font-semibold" style={{ color: '#fda4af' }}>This month is locked</p>
+              </div>
+              <p className="text-xs ml-6" style={{ color: '#94a3b8' }}>
+                Reopening will allow edits to expenses and meals.
+              </p>
+            </div>
+            <button
+              id="reopen-month-btn"
+              onClick={handleReopenMonth}
+              disabled={reopening}
+              className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-95"
+              style={{
+                background: 'rgba(245,158,11,0.12)',
+                border: '1px solid rgba(245,158,11,0.35)',
+                color: '#fbbf24',
+              }}
+            >
+              <Unlock className="w-4 h-4" />
+              {reopening ? 'Reopening...' : 'Reopen Month'}
+            </button>
+          </div>
         )}
       </div>
 

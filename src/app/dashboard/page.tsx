@@ -34,6 +34,7 @@ export default function DashboardPage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showMonthlyBreakdown, setShowMonthlyBreakdown] = useState(false);
 
   const today = new Date();
 
@@ -394,13 +395,18 @@ export default function DashboardPage() {
 
           {/* 2×2 stat grid */}
           <div className="grid grid-cols-2 gap-3">
-            <BentoStatCard
-              label="Monthly Expense"
-              value={monthlyExpenseVal}
-              icon={<IconWallet size={15} />}
-              isPrimary
-              suffix="Fixed + Shared + Grocery"
-            />
+            {/* Row 1 */}
+            <button id="monthly-expense-tile" onClick={() => setShowMonthlyBreakdown(true)}
+              className="text-left w-full block focus:outline-none group">
+              <BentoStatCard
+                label="Monthly Expense"
+                value={monthlyExpenseVal}
+                icon={<IconWallet size={15} />}
+                isPrimary
+                suffix="Fixed + Shared + Grocery"
+                clickable
+              />
+            </button>
             <BentoStatCard
               label={isOverpaid ? 'Overdue' : 'Due'}
               value={Math.abs(dueVal)}
@@ -408,18 +414,62 @@ export default function DashboardPage() {
               accentColor={isOverpaid ? 'emerald' : 'rose'}
               suffix={isOverpaid ? 'Flat owes you' : 'You owe flat'}
             />
+
+            {/* Row 2 — Total Paid (normal card) */}
             <BentoStatCard
               label="Total Paid"
               value={totalPaidVal}
               icon={<IconTrendUp size={15} />}
               accentColor="violet"
             />
-            <BentoStatCard
-              label="Grocery Spent"
-              value={totalMyGrocerySpent}
-              icon={<IconMeal size={15} />}
-              accentColor="cyan"
-            />
+
+            {/* Row 2 — Meal Expense Breakdown tile (h-[104px] matching other cards) */}
+            {(() => {
+              const myMealCost = (totalMyMeals + totalMyGuestMeals) * perMealRate;
+              const diff = totalMyGrocerySpent - myMealCost;  // positive = overpaid, negative = still owes
+              const isOver = diff >= 0;
+              const dueBg    = isOver ? 'rgba(16,185,129,0.12)' : 'rgba(244,63,94,0.1)';
+              const dueColor = isOver ? '#6ee7b7' : '#fda4af';
+              const subColor = isOver ? '#059669'  : '#e11d48';
+              const rightLabel = isOver ? 'Overpaid' : 'Due Amount';
+              const rightValue = Math.abs(diff);  // leftover = |paid - owed|
+              return (
+                <div className="rounded-2xl h-[104px] flex flex-col overflow-hidden transition-all duration-200"
+                  style={{ border: '1px solid rgba(6,182,212,0.2)', background: 'rgba(6,182,212,0.04)' }}>
+                  {/* Title bar */}
+                  <div className="flex items-center gap-1.5 px-3 pt-2 pb-1.5"
+                    style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
+                    <IconMeal size={11} style={{ color: '#67e8f9' }} />
+                    <span className="text-[9.5px] font-semibold tracking-wide uppercase" style={{ color: '#64748b' }}>
+                      Meal Expenses Breakdown
+                    </span>
+                  </div>
+                  {/* Two halves — fill remaining height */}
+                  <div className="flex flex-1 min-h-0">
+                    {/* Left — Grocery (Paid) */}
+                    <div className="flex-1 flex flex-col justify-between px-3 py-2"
+                      style={{ borderRight: '1px solid rgba(255,255,255,0.07)' }}>
+                      <span className="text-[10px] font-medium" style={{ color: '#94a3b8' }}>Grocery (Paid)</span>
+                      <p className="text-base font-extrabold leading-tight" style={{ color: '#67e8f9' }}>
+                        {formatBDT(totalMyGrocerySpent)}
+                      </p>
+                      <p className="text-[9.5px] font-semibold" style={{ color: '#475569' }}>Total spent</p>
+                    </div>
+                    {/* Right — Due Amount / Overpaid */}
+                    <div className="flex-1 flex flex-col justify-between px-3 py-2"
+                      style={{ background: dueBg }}>
+                      <span className="text-[10px] font-medium" style={{ color: '#94a3b8' }}>{rightLabel}</span>
+                      <p className="text-base font-extrabold leading-tight" style={{ color: dueColor }}>
+                        {formatBDT(rightValue)}
+                      </p>
+                      <p className="text-[9.5px] font-semibold" style={{ color: subColor }}>
+                        {isOver ? 'vs meal cost' : 'remaining to pay'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Meal Stats */}
@@ -511,6 +561,17 @@ export default function DashboardPage() {
       {showCalculator && (
         <Calculator onClose={() => setShowCalculator(false)} />
       )}
+
+      {/* Monthly Expense Breakdown Modal */}
+      <MonthlyBreakdownModal
+        open={showMonthlyBreakdown}
+        onClose={() => setShowMonthlyBreakdown(false)}
+        myOverheads={myOverheads}
+        sharedWithAmount={sharedWithAmount}
+        activeCount={activeCount}
+        totalMyGrocerySpent={totalMyGrocerySpent}
+        monthlyExpenseVal={monthlyExpenseVal}
+      />
     </div>
   );
 }
@@ -664,8 +725,110 @@ function MealCalendar({
 }
 
 // ── Bento Stat Card ───────────────────────────────────────────────────────────
-function BentoStatCard({ label, value, icon, isPrimary, accentColor, suffix }: {
+// ─── Monthly Breakdown Modal ──────────────────────────────────────────────────
+function MonthlyBreakdownModal({
+  open, onClose,
+  myOverheads, sharedWithAmount, activeCount, totalMyGrocerySpent, monthlyExpenseVal,
+}: {
+  open: boolean;
+  onClose: () => void;
+  myOverheads: any[];
+  sharedWithAmount: any[];
+  activeCount: number;
+  totalMyGrocerySpent: number;
+  monthlyExpenseVal: number;
+}) {
+  if (!open) return null;
+  const totalFixed  = myOverheads.reduce((s: number, c: any) => s + c.amount, 0);
+  const totalShared = sharedWithAmount.reduce((s: number, c: any) => s + c.total_amount / activeCount, 0);
+
+  const Row = ({ label, amount, accent }: { label: string; amount: number; accent?: string }) => (
+    <div className="flex items-center justify-between py-2"
+      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+      <span className="text-xs font-medium capitalize" style={{ color: '#94a3b8' }}>{label}</span>
+      <span className="text-sm font-bold" style={{ color: accent ?? '#f1f5f9' }}>{formatBDT(amount)}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}>
+      <div className="w-full max-w-xs rounded-2xl overflow-hidden"
+        style={{ background: '#0d1220', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(16,185,129,0.15)' }}>
+              <IconWallet size={14} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: '#94a3b8' }}>Monthly Expense</p>
+              <p className="text-lg font-extrabold" style={{ color: '#10b981' }}>{formatBDT(monthlyExpenseVal)}</p>
+            </div>
+          </div>
+          <button onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+            style={{ background: 'rgba(255,255,255,0.06)' }}
+            aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-3">
+
+          {/* Fixed Overheads */}
+          {myOverheads.length > 0 && (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-2" style={{ color: '#475569' }}>Fixed Overheads</p>
+              {myOverheads.map((o: any) => (
+                <Row key={o.id ?? o.category} label={o.category} amount={o.amount} accent="#a78bfa" />
+              ))}
+              <div className="flex justify-between py-1.5">
+                <span className="text-[10px] font-semibold" style={{ color: '#475569' }}>Subtotal</span>
+                <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>{formatBDT(totalFixed)}</span>
+              </div>
+            </>
+          )}
+
+          {/* Shared Expenses */}
+          {sharedWithAmount.length > 0 && (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>Shared Expenses <span style={{ color: '#334155' }}>(÷{activeCount})</span></p>
+              {sharedWithAmount.map((s: any) => (
+                <Row key={s.id ?? s.category} label={s.category} amount={s.total_amount / activeCount} accent="#67e8f9" />
+              ))}
+              <div className="flex justify-between py-1.5">
+                <span className="text-[10px] font-semibold" style={{ color: '#475569' }}>Subtotal</span>
+                <span className="text-xs font-bold" style={{ color: '#67e8f9' }}>{formatBDT(totalShared)}</span>
+              </div>
+            </>
+          )}
+
+          {/* Grocery */}
+          <p className="text-[10px] font-semibold uppercase tracking-widest mb-1 mt-3" style={{ color: '#475569' }}>Grocery</p>
+          <Row label="Grocery / Bazaar" amount={totalMyGrocerySpent} accent="#fbbf24" />
+
+          {/* Grand Total */}
+          <div className="flex items-center justify-between mt-4 mb-2 pt-3"
+            style={{ borderTop: '2px solid rgba(16,185,129,0.3)' }}>
+            <span className="text-sm font-bold" style={{ color: '#f1f5f9' }}>Total</span>
+            <span className="text-base font-extrabold" style={{ color: '#10b981' }}>{formatBDT(monthlyExpenseVal)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BentoStatCard({ label, value, icon, isPrimary, accentColor, suffix, clickable }: {
   label: string;
+  clickable?: boolean;
   value: number;
   icon: React.ReactNode;
   isPrimary?: boolean;
@@ -687,6 +850,7 @@ function BentoStatCard({ label, value, icon, isPrimary, accentColor, suffix }: {
   return (
     <div className="rounded-2xl p-3.5 h-[104px] flex flex-col justify-between transition-all duration-200"
       style={{
+        cursor: clickable ? 'pointer' : 'default',
         background: isPrimary ? primaryBg  : (accent?.bg ?? 'rgba(255,255,255,0.03)'),
         border: `1px solid ${isPrimary ? primaryBorder : (accent?.border ?? 'rgba(255,255,255,0.07)')}`,
       }}>
